@@ -16,7 +16,7 @@ pub mod batch;
 
 // Re-export main types for backward compatibility
 pub use config::{DownloadConfig, DownloadConfigBuilder};
-pub use error::{DownloadError, Result};
+pub use error::{DownloadError, Result, ErrorSeverity, FileOperation, ValidationType, ErrorContext};
 pub use validation::{FileValidation, ValidationHandle, ValidationPool};
 pub use http::HttpDownloader;
 pub use progress::{ProgressEvent, ProgressCallback, ProgressReporter, IntoProgressCallback, ConsoleProgressReporter, NullProgressReporter, CompositeProgressReporter};
@@ -131,7 +131,15 @@ impl DownloaderRegistry {
             .iter()
             .find(|d| d.supports_url(url))
             .map(|d| d.as_ref())
-            .ok_or_else(|| DownloadError::UnsupportedUrl(url.to_string()))
+            .ok_or_else(|| {
+                let parsed_url = url::Url::parse(url);
+                let scheme = parsed_url.map(|u| u.scheme().to_string()).unwrap_or_else(|_| "unknown".to_string());
+                DownloadError::UnsupportedUrl {
+                    url: url.to_string(),
+                    scheme,
+                    supported_schemes: "http, https".to_string(),
+                }
+            })
     }
 
     pub async fn attempt_download(

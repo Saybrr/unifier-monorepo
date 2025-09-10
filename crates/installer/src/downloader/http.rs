@@ -193,9 +193,12 @@ impl FileDownloader for HttpDownloader {
                 debug!("Validating downloaded file");
                 if !request.validation.validate_file(&dest_path, progress_callback).await? {
                     fs::remove_file(&dest_path).await?;
-                    return Err(DownloadError::ValidationError {
+                    return Err(DownloadError::ValidationFailed {
+                        file: dest_path.clone(),
+                        validation_type: crate::downloader::error::ValidationType::Size, // Default validation type
                         expected: "valid file".to_string(),
                         actual: "invalid file".to_string(),
+                        suggestion: "Check file integrity or download again".to_string(),
                     });
                 }
                 debug!("File validation passed");

@@ -1,6 +1,10 @@
 //! Comprehensive unit tests for the downloader module
 
 use super::*;
+use crate::downloader::{
+    error::{ErrorSeverity, FileOperation, ValidationType},
+    progress::{IntoProgressCallback, NullProgressReporter, ConsoleProgressReporter, CompositeProgressReporter},
+};
 use crc32fast::Hasher as Crc32Hasher;
 use std::sync::{Arc, Mutex};
 use tempfile::{tempdir, TempDir};
@@ -188,7 +192,7 @@ mod file_validation_tests {
 
         assert!(result.is_err());
         match result.unwrap_err() {
-            DownloadError::SizeMismatch { expected, actual } => {
+            DownloadError::SizeMismatch { expected, actual, file: _, diff: _ } => {
                 assert_eq!(expected, wrong_size);
                 assert_eq!(actual, test_data.len() as u64);
             }
@@ -227,8 +231,8 @@ mod file_validation_tests {
 
         assert!(result.is_err());
         match result.unwrap_err() {
-            DownloadError::IoError(_) => {}
-            _ => panic!("Expected IoError"),
+            DownloadError::FileSystem { .. } => {}
+            _ => panic!("Expected FileSystem error"),
         }
     }
 }
@@ -433,8 +437,8 @@ mod http_downloader_tests {
 
         assert!(result.is_err());
         match result.unwrap_err() {
-            DownloadError::ValidationError { .. } => {}
-            _ => panic!("Expected ValidationError"),
+            DownloadError::ValidationFailed { .. } => {}
+            _ => panic!("Expected ValidationFailed error"),
         }
 
         // File should be cleaned up after validation failure
@@ -471,8 +475,8 @@ mod http_downloader_tests {
 
         assert!(result.is_err());
         match result.unwrap_err() {
-            DownloadError::HttpError(_) => {}
-            _ => panic!("Expected HttpError"),
+            DownloadError::HttpRequest { .. } => {}
+            _ => panic!("Expected HttpRequest error"),
         }
     }
 }
@@ -662,7 +666,7 @@ mod enhanced_downloader_tests {
 
         assert!(result.is_err());
         match result.unwrap_err() {
-            DownloadError::MaxRetriesExceeded => {}
+            DownloadError::MaxRetriesExceeded { .. } => {}
             _ => panic!("Expected MaxRetriesExceeded error"),
         }
     }
@@ -743,5 +747,412 @@ mod integration_tests {
         assert!(has_download_started);
         assert!(has_download_complete);
         assert!(has_validation_complete);
+    }
+}
+
+#[cfg(test)]
+mod enhanced_error_tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn test_error_severity_ordering() {
+        assert!(ErrorSeverity::Low < ErrorSeverity::Medium);
+        assert!(ErrorSeverity::Medium < ErrorSeverity::High);
+        assert!(ErrorSeverity::High < ErrorSeverity::Critical);
+    }
+
+    #[test]
+    fn test_error_categorization() {
+        let timeout_error = DownloadError::NetworkTimeout {
+            url: "http://example.com".to_string(),
+            duration_secs: 30,
+        };
+
+        assert_eq!(timeout_error.category(), "network_timeout");
+        assert_eq!(timeout_error.severity(), ErrorSeverity::Medium);
+        assert!(timeout_error.is_recoverable());
+    }
+
+    #[test]
+    fn test_validation_error_context() {
+        let file_path = PathBuf::from("/test/file.txt");
+        let validation_error = DownloadError::ValidationFailed {
+            file: file_path.clone(),
+            validation_type: ValidationType::Md5,
+            expected: "abc123".to_string(),
+            actual: "def456".to_string(),
+            suggestion: "Re-download the file as it may be corrupted".to_string(),
+        };
+
+        assert_eq!(validation_error.category(), "validation_failed");
+        assert_eq!(validation_error.severity(), ErrorSeverity::High);
+        assert!(!validation_error.is_recoverable());
+        assert!(validation_error.suggestion().is_some());
+    }
+
+    #[test]
+    fn test_size_mismatch_error() {
+        let file_path = PathBuf::from("/test/file.txt");
+        let expected = 1000u64;
+        let actual = 800u64;
+
+        let size_error = DownloadError::SizeMismatch {
+            file: file_path,
+            expected,
+            actual,
+            diff: actual as i64 - expected as i64,
+        };
+
+        let error_msg = format!("{}", size_error);
+        assert!(error_msg.contains("expected 1000 bytes"));
+        assert!(error_msg.contains("got 800 bytes"));
+        assert!(error_msg.contains("difference: -200 bytes"));
+    }
+
+    #[test]
+    fn test_network_timeout_error() {
+        let timeout_error = DownloadError::NetworkTimeout {
+            url: "http://slow-server.com/file.zip".to_string(),
+            duration_secs: 60,
+        };
+
+        assert!(timeout_error.is_recoverable());
+        assert_eq!(timeout_error.severity(), ErrorSeverity::Medium);
+        assert!(timeout_error.suggestion().unwrap().contains("timeout"));
+    }
+
+    #[test]
+    fn test_detailed_error_report() {
+        let error = DownloadError::InsufficientSpace {
+            required: 1_000_000_000,
+            available: 500_000_000,
+            shortage: 500_000_000,
+            path: PathBuf::from("/downloads"),
+        };
+
+        let report = error.detailed_report();
+        assert!(report.contains("Category: insufficient_space"));
+        assert!(report.contains("Severity: Critical"));
+        assert!(report.contains("Recoverable: false"));
+        assert!(report.contains("Suggestion:"));
+    }
+
+    #[test]
+    fn test_error_context_builder() {
+        let context = ErrorContext::new()
+            .with_url("http://example.com/file.zip")
+            .with_file("/tmp/download")
+            .with_operation(FileOperation::Write);
+
+        assert!(context.url.is_some());
+        assert!(context.file.is_some());
+        assert!(context.operation.is_some());
+    }
+}
+
+#[cfg(test)]
+mod config_builder_tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn test_default_config() {
+        let config = DownloadConfig::default();
+        assert_eq!(config.max_retries, 3);
+        assert_eq!(config.timeout, Duration::from_secs(30));
+        assert_eq!(config.user_agent, "installer/0.1.0");
+        assert!(config.allow_resume);
+        assert_eq!(config.chunk_size, 8192);
+        assert_eq!(config.max_concurrent_validations, 4);
+        assert!(config.async_validation);
+        assert_eq!(config.validation_retries, 2);
+    }
+
+    #[test]
+    fn test_config_builder_basic() {
+        let config = DownloadConfigBuilder::new()
+            .max_retries(5)
+            .timeout(Duration::from_secs(60))
+            .user_agent("test-agent/1.0")
+            .build();
+
+        assert_eq!(config.max_retries, 5);
+        assert_eq!(config.timeout, Duration::from_secs(60));
+        assert_eq!(config.user_agent, "test-agent/1.0");
+    }
+
+    #[test]
+    fn test_config_builder_high_performance() {
+        let config = DownloadConfigBuilder::new()
+            .high_performance()
+            .build();
+
+        assert_eq!(config.max_concurrent_validations, 8);
+        assert!(config.async_validation);
+        assert!(config.parallel_validation);
+        assert_eq!(config.chunk_size, 16384);
+        assert_eq!(config.streaming_threshold, 20_000_000);
+    }
+
+    #[test]
+    fn test_config_builder_low_memory() {
+        let config = DownloadConfigBuilder::new()
+            .low_memory()
+            .build();
+
+        assert_eq!(config.max_concurrent_validations, 2);
+        assert!(!config.async_validation);
+        assert!(!config.parallel_validation);
+        assert_eq!(config.chunk_size, 4096);
+        assert_eq!(config.streaming_threshold, 1_000_000);
+    }
+
+    #[test]
+    fn test_config_builder_reliable() {
+        let config = DownloadConfigBuilder::new()
+            .reliable()
+            .build();
+
+        assert_eq!(config.max_retries, 5);
+        assert_eq!(config.validation_retries, 3);
+        assert_eq!(config.timeout, Duration::from_secs(60));
+        assert!(!config.async_validation);
+    }
+}
+
+#[cfg(test)]
+mod progress_reporter_tests {
+    use super::*;
+
+    #[test]
+    fn test_null_progress_reporter() {
+        let reporter = NullProgressReporter;
+
+        // These should not panic and should do nothing
+        reporter.on_download_started("http://example.com", Some(1000));
+        reporter.on_download_progress("http://example.com", 500, Some(1000), 100.0);
+        reporter.on_download_complete("http://example.com", 1000);
+    }
+
+    #[test]
+    fn test_console_progress_reporter_creation() {
+        let reporter = ConsoleProgressReporter::new(true);
+        assert!(reporter.verbose);
+
+        let reporter = ConsoleProgressReporter::new(false);
+        assert!(!reporter.verbose);
+    }
+
+    #[test]
+    fn test_composite_progress_reporter() {
+        let mut composite = CompositeProgressReporter::new();
+        composite = composite.add_reporter(NullProgressReporter);
+        composite = composite.add_reporter(NullProgressReporter);
+
+        // Should not panic when calling methods
+        composite.on_download_started("http://example.com", Some(1000));
+        composite.on_error("http://example.com", "Test error");
+    }
+
+    #[test]
+    fn test_progress_reporter_into_callback() {
+        let reporter = NullProgressReporter;
+        let callback = reporter.into_callback();
+
+        // Should not panic when called
+        callback(ProgressEvent::DownloadStarted {
+            url: "http://example.com".to_string(),
+            total_size: Some(1000),
+        });
+    }
+}
+
+#[cfg(test)]
+mod metrics_tests {
+    use super::*;
+
+    #[test]
+    fn test_download_metrics_default() {
+        let metrics = DownloadMetrics::default();
+        let snapshot = metrics.snapshot();
+
+        assert_eq!(snapshot.total_downloads, 0);
+        assert_eq!(snapshot.successful_downloads, 0);
+        assert_eq!(snapshot.failed_downloads, 0);
+        assert_eq!(snapshot.total_bytes, 0);
+        assert_eq!(snapshot.success_rate(), 0.0);
+        assert_eq!(snapshot.average_size(), 0.0);
+    }
+
+    #[test]
+    fn test_download_metrics_recording() {
+        let metrics = DownloadMetrics::default();
+
+        metrics.record_download_started();
+        metrics.record_download_completed(1000);
+
+        metrics.record_download_started();
+        metrics.record_download_failed();
+
+        let snapshot = metrics.snapshot();
+        assert_eq!(snapshot.total_downloads, 2);
+        assert_eq!(snapshot.successful_downloads, 1);
+        assert_eq!(snapshot.failed_downloads, 1);
+        assert_eq!(snapshot.total_bytes, 1000);
+        assert_eq!(snapshot.success_rate(), 0.5);
+        assert_eq!(snapshot.average_size(), 1000.0);
+    }
+
+    #[test]
+    fn test_cache_hits() {
+        let metrics = DownloadMetrics::default();
+
+        metrics.record_cache_hit(500);
+        metrics.record_cache_hit(300);
+
+        let snapshot = metrics.snapshot();
+        assert_eq!(snapshot.cache_hits, 2);
+        assert_eq!(snapshot.total_bytes, 800);
+    }
+
+    #[test]
+    fn test_validation_failures() {
+        let metrics = DownloadMetrics::default();
+
+        metrics.record_validation_failed();
+        metrics.record_validation_failed();
+
+        let snapshot = metrics.snapshot();
+        assert_eq!(snapshot.validation_failures, 2);
+    }
+
+    #[test]
+    fn test_retries() {
+        let metrics = DownloadMetrics::default();
+
+        metrics.record_retry();
+        metrics.record_retry();
+        metrics.record_retry();
+
+        let snapshot = metrics.snapshot();
+        assert_eq!(snapshot.retries_attempted, 3);
+    }
+}
+
+#[cfg(test)]
+mod http_downloader_enhanced_tests {
+    use super::*;
+
+    #[test]
+    fn test_http_downloader_presets() {
+        let large_files_downloader = HttpDownloader::for_large_files();
+        let small_files_downloader = HttpDownloader::for_small_files();
+        let reliable_downloader = HttpDownloader::reliable();
+
+        // These should not panic and should create valid downloaders
+        assert!(large_files_downloader.supports_url("https://example.com"));
+        assert!(small_files_downloader.supports_url("https://example.com"));
+        assert!(reliable_downloader.supports_url("https://example.com"));
+    }
+}
+
+#[cfg(test)]
+mod new_enhanced_downloader_tests {
+    use super::*;
+
+    #[test]
+    fn test_enhanced_downloader_creation() {
+        let config = DownloadConfig::default();
+        let downloader = EnhancedDownloader::new(config);
+
+        let metrics = downloader.metrics();
+        let snapshot = metrics.snapshot();
+        assert_eq!(snapshot.total_downloads, 0);
+    }
+
+    #[test]
+    fn test_enhanced_downloader_with_registry() {
+        let registry = DownloaderRegistry::new()
+            .with_http_downloader(DownloadConfig::default());
+        let config = DownloadConfig::default();
+        let downloader = EnhancedDownloader::with_registry(registry, config);
+
+        assert!(downloader.metrics().snapshot().total_downloads == 0);
+    }
+}
+
+#[cfg(test)]
+mod enhanced_integration_tests {
+    use super::*;
+
+    async fn setup_mock_server() -> MockServer {
+        MockServer::start().await
+    }
+
+    #[tokio::test]
+    async fn test_complete_download_workflow_with_enhanced_features() {
+        let mock_server = setup_mock_server().await;
+        let test_content = b"Integration test content with enhanced features!";
+        let expected_crc32 = calculate_crc32(test_content);
+
+        // Set up mock responses
+        Mock::given(method("HEAD"))
+            .and(path("/enhanced-test.txt"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .append_header("content-length", test_content.len().to_string())
+            )
+            .mount(&mock_server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/enhanced-test.txt"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_bytes(test_content)
+                    .append_header("content-length", test_content.len().to_string())
+            )
+            .mount(&mock_server)
+            .await;
+
+        // Create enhanced configuration
+        let config = DownloadConfigBuilder::new()
+            .high_performance()
+            .max_retries(2)
+            .build();
+
+        let downloader = EnhancedDownloader::new(config);
+        let temp_dir = tempdir().unwrap();
+        let url = format!("{}/enhanced-test.txt", mock_server.uri());
+
+        // Create request with validation
+        let validation = FileValidation::new().with_crc32(expected_crc32);
+        let request = DownloadRequest::new(url, temp_dir.path())
+            .with_filename("enhanced-test.txt")
+            .with_validation(validation);
+
+        // Use enhanced progress reporting
+        let progress_reporter = ConsoleProgressReporter::new(false); // Non-verbose for tests
+        let progress_callback = Some(progress_reporter.into_callback());
+
+        // Perform download
+        let result = downloader.download(request, progress_callback).await;
+
+        assert!(result.is_ok());
+
+        match result.unwrap() {
+            DownloadResult::Downloaded { size } => {
+                assert_eq!(size, test_content.len() as u64);
+            }
+            _ => panic!("Expected Downloaded result"),
+        }
+
+        // Check metrics
+        let metrics = downloader.metrics();
+        let snapshot = metrics.snapshot();
+        assert!(snapshot.successful_downloads > 0);
+        assert!(snapshot.total_bytes > 0);
+        assert!(snapshot.success_rate() > 0.0);
     }
 }

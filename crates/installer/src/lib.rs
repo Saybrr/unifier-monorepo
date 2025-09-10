@@ -84,7 +84,7 @@ pub use downloader::{
     BatchDownloadResult, DownloadMetrics, DownloadMetricsSnapshot,
 
     // Error handling
-    DownloadError, Result,
+    DownloadError, Result, ErrorSeverity, FileOperation, ValidationType, ErrorContext,
 };
 
 pub fn add(left: u64, right: u64) -> u64 {

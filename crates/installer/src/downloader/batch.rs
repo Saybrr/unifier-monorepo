@@ -217,7 +217,12 @@ pub async fn download_with_retry(
         }
     }
 
-    Err(DownloadError::MaxRetriesExceeded)
+    Err(DownloadError::MaxRetriesExceeded {
+        url: request.url.clone(),
+        max_retries,
+        total_duration_secs: 0, // Duration not tracked in this function
+        last_error: last_error.map_or("No specific error recorded".to_string(), |e| e.to_string()),
+    })
 }
 
 /// Download with async validation option
@@ -276,9 +281,12 @@ pub async fn download_with_async_validation(
         if !request.validation.validate_file(&dest_path, progress_callback).await? {
             metrics.record_validation_failed();
             fs::remove_file(&dest_path).await?;
-            return Err(DownloadError::ValidationError {
+            return Err(DownloadError::ValidationFailed {
+                file: dest_path.clone(),
+                validation_type: crate::downloader::error::ValidationType::Size, // Default validation type
                 expected: "valid file".to_string(),
                 actual: "invalid file".to_string(),
+                suggestion: "Check file integrity or download again".to_string(),
             });
         }
         Ok(DownloadResult::Downloaded { size })
@@ -330,9 +338,11 @@ async fn download_file_only(
             Ok(DownloadResult::AlreadyExists { size }) => return Ok(size),
             Ok(DownloadResult::DownloadedPendingValidation { .. }) => {
                 // This shouldn't happen since we disabled validation
-                return Err(DownloadError::ValidationTaskError(
-                    "Unexpected pending validation state".to_string(),
-                ));
+                return Err(DownloadError::ValidationTaskFailed {
+                    file: request.destination.join(request.get_filename().unwrap_or_else(|_| "unknown".to_string())),
+                    reason: "Unexpected pending validation state".to_string(),
+                    source: None,
+                });
             }
             Err(e) => {
                 last_error = Some(e);
@@ -367,9 +377,11 @@ async fn download_file_only(
             Ok(DownloadResult::Resumed { size }) => return Ok(size),
             Ok(DownloadResult::AlreadyExists { size }) => return Ok(size),
             Ok(DownloadResult::DownloadedPendingValidation { .. }) => {
-                return Err(DownloadError::ValidationTaskError(
-                    "Unexpected pending validation state".to_string(),
-                ));
+                return Err(DownloadError::ValidationTaskFailed {
+                    file: request.destination.join(request.get_filename().unwrap_or_else(|_| "unknown".to_string())),
+                    reason: "Unexpected pending validation state".to_string(),
+                    source: None,
+                });
             }
             Err(e) => {
                 last_error = Some(e);
@@ -387,7 +399,12 @@ async fn download_file_only(
         }
     }
 
-    Err(DownloadError::MaxRetriesExceeded)
+    Err(DownloadError::MaxRetriesExceeded {
+        url: request.url.clone(),
+        max_retries,
+        total_duration_secs: 0, // Duration not tracked in this function
+        last_error: last_error.map_or("No specific error recorded".to_string(), |e| e.to_string()),
+    })
 }
 
 /// Download multiple files concurrently
@@ -510,9 +527,12 @@ pub async fn download_batch_with_async_validation(
                         retry_queue.push_back((original_index, validation_handle.request));
                     } else {
                         // No retries, mark as validation error
-                        final_results[original_index] = Some(Err(DownloadError::ValidationError {
+                        final_results[original_index] = Some(Err(DownloadError::ValidationFailed {
+                            file: validation_handle.file_path.clone(),
+                            validation_type: crate::downloader::error::ValidationType::Size, // Default validation type
                             expected: "valid file".to_string(),
                             actual: "invalid file".to_string(),
+                            suggestion: "Check file integrity or download again".to_string(),
                         }));
                     }
                 }
@@ -522,9 +542,11 @@ pub async fn download_batch_with_async_validation(
                     if config.validation_retries > 0 {
                         retry_queue.push_back((original_index, validation_handle.request));
                     } else {
-                        final_results[original_index] = Some(Err(DownloadError::ValidationTaskError(
-                            format!("Validation task failed: {}", e),
-                        )));
+                        final_results[original_index] = Some(Err(DownloadError::ValidationTaskFailed {
+                            file: validation_handle.file_path.clone(),
+                            reason: format!("Validation task failed: {}", e),
+                            source: Some(Box::new(e) as Box<dyn std::error::Error + Send + Sync>),
+                        }));
                     }
                 }
             }
@@ -591,17 +613,22 @@ pub async fn download_batch_with_async_validation(
                             }
                             retry_queue.push_back((original_index, validation_handle.request));
                         } else {
-                            final_results[original_index] = Some(Err(DownloadError::ValidationError {
+                            final_results[original_index] = Some(Err(DownloadError::ValidationFailed {
+                                file: validation_handle.file_path.clone(),
+                                validation_type: crate::downloader::error::ValidationType::Size, // Default validation type
                                 expected: "valid file".to_string(),
                                 actual: "invalid file after retries".to_string(),
+                                suggestion: "File failed validation even after retries - may be corrupted".to_string(),
                             }));
                         }
                     }
                     Err(e) => {
                         warn!("Retry validation task failed: {}", e);
-                        final_results[original_index] = Some(Err(DownloadError::ValidationTaskError(
-                            format!("Retry validation task failed: {}", e),
-                        )));
+                        final_results[original_index] = Some(Err(DownloadError::ValidationTaskFailed {
+                            file: validation_handle.file_path.clone(),
+                            reason: format!("Retry validation task failed: {}", e),
+                            source: Some(Box::new(e) as Box<dyn std::error::Error + Send + Sync>),
+                        }));
                     }
                 }
             }
@@ -610,9 +637,14 @@ pub async fn download_batch_with_async_validation(
         // Mark any remaining failed retries
         for (original_index, failed_request) in retry_queue {
             warn!("Max validation retries exceeded for {}", failed_request.url);
-            final_results[original_index] = Some(Err(DownloadError::ValidationError {
+            let filename = failed_request.get_filename().unwrap_or_else(|_| "unknown".to_string());
+            let file_path = failed_request.destination.join(filename);
+            final_results[original_index] = Some(Err(DownloadError::ValidationFailed {
+                file: file_path,
+                validation_type: crate::downloader::error::ValidationType::Size, // Default validation type
                 expected: "valid file".to_string(),
                 actual: "max validation retries exceeded".to_string(),
+                suggestion: "File failed validation after maximum retry attempts".to_string(),
             }));
         }
     }
@@ -621,9 +653,11 @@ pub async fn download_batch_with_async_validation(
     // Fill any remaining None values with errors
     let result: Vec<Result<DownloadResult>> = final_results.into_iter()
         .map(|opt_result| {
-            opt_result.unwrap_or_else(|| Err(DownloadError::ValidationTaskError(
-                "Download result was not properly set".to_string(),
-            )))
+            opt_result.unwrap_or_else(|| Err(DownloadError::ValidationTaskFailed {
+                file: std::path::PathBuf::from("unknown"),
+                reason: "Download result was not properly set".to_string(),
+                source: None,
+            }))
         })
         .collect();
 

@@ -111,8 +111,10 @@ impl FileValidation {
                     });
                 }
                 return Err(DownloadError::SizeMismatch {
+                    file: path.to_path_buf(),
                     expected: expected_size,
                     actual: file_size,
+                    diff: (file_size as i64) - (expected_size as i64),
                 });
             }
         }
@@ -167,7 +169,11 @@ impl FileValidation {
         // Wait for all tasks and validate results
         for task in tasks {
             let (hash_type, actual_hash) = task.await.map_err(|e| {
-                DownloadError::ValidationTaskError(format!("Hash computation failed: {}", e))
+                DownloadError::ValidationTaskFailed {
+                    file: path.to_path_buf(),
+                    reason: format!("Hash computation failed: {}", e),
+                    source: Some(Box::new(e) as Box<dyn std::error::Error + Send + Sync>),
+                }
             })?;
 
             let validation_passed = match hash_type {
@@ -313,12 +319,17 @@ impl FileValidation {
         let callback = progress_callback.clone();
 
         // Move to blocking thread to avoid blocking the async runtime
+        let path_clone = path.clone();
         tokio::task::spawn_blocking(move || {
             let rt = tokio::runtime::Handle::current();
             rt.block_on(validation.validate_file(&path, callback))
         })
         .await
-        .map_err(|e| DownloadError::ValidationTaskError(format!("Validation task failed: {}", e)))?
+        .map_err(|e| DownloadError::ValidationTaskFailed {
+            file: path_clone,
+            reason: format!("Validation task failed: {}", e),
+            source: Some(Box::new(e) as Box<dyn std::error::Error + Send + Sync>),
+        })?
     }
 }
 

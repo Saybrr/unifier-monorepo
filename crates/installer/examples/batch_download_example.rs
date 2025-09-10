@@ -1,7 +1,10 @@
-//! Example demonstrating batch downloads with the installer downloader
+//! Example demonstrating enhanced batch downloads with the installer downloader
 //!
-//! This example shows how to download multiple files concurrently using
-//! the download_batch method with progress tracking and error handling.
+//! This example shows how to use the new improved API with:
+//! - Builder pattern for configuration
+//! - Enhanced progress reporting with traits
+//! - Built-in performance metrics
+//! - Better error handling with context
 //!
 //! Run this example with:
 //! ```
@@ -9,8 +12,8 @@
 //! ```
 
 use installer::{
-    DownloadConfig, DownloadRequest, EnhancedDownloader,
-    FileValidation, ProgressEvent, DownloadResult
+    DownloadConfigBuilder, DownloadRequest, EnhancedDownloader,
+    FileValidation, ProgressReporter, IntoProgressCallback, DownloadResult
 };
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -28,22 +31,24 @@ async fn main() -> installer::Result<()> {
     let temp_dir = tempdir().unwrap();
     println!("📁 Download directory: {}", temp_dir.path().display());
 
-    // Configure the downloader with async validation enabled
-    let config = DownloadConfig {
-        max_retries: 3,
-        timeout: Duration::from_secs(60),
-        user_agent: "batch-downloader-example/1.0".to_string(),
-        allow_resume: true,
-        chunk_size: 8192,
-        max_concurrent_validations: 2,
-        async_validation: true,
-        validation_retries: 2,
-        streaming_threshold: 1024 * 1024, // 1MB
-        parallel_validation: true,
-    };
+    // Configure the downloader using the new builder pattern
+    let config = DownloadConfigBuilder::new()
+        .high_performance() // Optimizes for speed and concurrency
+        .max_retries(3)
+        .timeout(Duration::from_secs(60))
+        .user_agent("enhanced-batch-downloader/2.0")
+        .validation_retries(2)
+        .build();
+
+    // Save config values we'll need later before moving config
+    let async_validation = config.async_validation;
+    let validation_retries = config.validation_retries;
 
     // Create the downloader
-    let downloader = EnhancedDownloader::new(config.clone());
+    let downloader = EnhancedDownloader::new(config);
+
+    // Get access to built-in metrics
+    let metrics = downloader.metrics();
 
     // Create multiple download requests with different file sizes
     let requests = vec![
@@ -117,70 +122,86 @@ async fn main() -> installer::Result<()> {
 
     println!("📦 Preparing to download {} files", requests.len());
 
-    // Set up shared progress tracking
+    // Set up enhanced progress tracking using the new trait-based system
     let completed_downloads = Arc::new(AtomicUsize::new(0));
     let total_downloads = requests.len();
 
-    // Create progress callback that tracks overall batch progress
-    let progress_callback = {
-        let completed = completed_downloads.clone();
-        Arc::new(move |event: ProgressEvent| {
-            match event {
-                ProgressEvent::DownloadStarted { url, total_size } => {
-                    println!("📥 Started: {} ({:?} bytes)",
-                        extract_filename_from_url(&url), total_size);
-                }
-                ProgressEvent::DownloadProgress { url, downloaded, total, speed_bps } => {
-                    let filename = extract_filename_from_url(&url);
-                    if let Some(total) = total {
-                        let percent = (downloaded as f64 / total as f64) * 100.0;
-                        println!("   📊 {}: {:.1}% ({}/{} bytes) @ {:.1} KB/s",
-                            filename, percent, downloaded, total, speed_bps / 1024.0);
-                    } else {
-                        println!("   📊 {}: {} bytes @ {:.1} KB/s",
-                            filename, downloaded, speed_bps / 1024.0);
-                    }
-                }
-                ProgressEvent::DownloadComplete { url, final_size } => {
-                    let completed_count = completed.fetch_add(1, Ordering::SeqCst) + 1;
-                    println!("✅ Completed: {} ({} bytes) [{}/{}]",
-                        extract_filename_from_url(&url), final_size, completed_count, total_downloads);
-                }
-                ProgressEvent::ValidationStarted { file } => {
-                    println!("🔍 Validating: {}", extract_filename_from_path(&file));
-                }
-                ProgressEvent::ValidationProgress { file, progress } => {
-                    let filename = extract_filename_from_path(&file);
-                    println!("   🔍 Validating {}: {:.1}%", filename, progress * 100.0);
-                }
-                ProgressEvent::ValidationComplete { file, valid } => {
-                    let filename = extract_filename_from_path(&file);
-                    if valid {
-                        println!("✅ Validation passed: {}", filename);
-                    } else {
-                        println!("❌ Validation failed: {}", filename);
-                    }
-                }
-                ProgressEvent::RetryAttempt { url, attempt, max_attempts } => {
-                    println!("🔄 Retry {}/{} for: {}",
-                        attempt, max_attempts, extract_filename_from_url(&url));
-                }
-                ProgressEvent::Error { url, error } => {
-                    println!("❌ Error downloading {}: {}",
-                        extract_filename_from_url(&url), error);
-                }
+    // Create a custom progress reporter using the new trait system
+    #[derive(Debug)]
+    struct BatchProgressReporter {
+        completed: Arc<AtomicUsize>,
+        total: usize,
+    }
+
+    impl ProgressReporter for BatchProgressReporter {
+        fn on_download_started(&self, url: &str, total_size: Option<u64>) {
+            println!("📥 Started: {} ({:?} bytes)",
+                extract_filename_from_url(url), total_size);
+        }
+
+        fn on_download_progress(&self, url: &str, downloaded: u64, total: Option<u64>, speed_bps: f64) {
+            let filename = extract_filename_from_url(url);
+            if let Some(total) = total {
+                let percent = (downloaded as f64 / total as f64) * 100.0;
+                println!("   📊 {}: {:.1}% ({}/{} bytes) @ {:.1} KB/s",
+                    filename, percent, downloaded, total, speed_bps / 1024.0);
+            } else {
+                println!("   📊 {}: {} bytes @ {:.1} KB/s",
+                    filename, downloaded, speed_bps / 1024.0);
             }
-        })
+        }
+
+        fn on_download_complete(&self, url: &str, final_size: u64) {
+            let completed_count = self.completed.fetch_add(1, Ordering::SeqCst) + 1;
+            println!("✅ Completed: {} ({} bytes) [{}/{}]",
+                extract_filename_from_url(url), final_size, completed_count, self.total);
+        }
+
+        fn on_validation_started(&self, file: &str) {
+            println!("🔍 Validating: {}", extract_filename_from_path(file));
+        }
+
+        fn on_validation_progress(&self, file: &str, progress: f64) {
+            let filename = extract_filename_from_path(file);
+            println!("   🔍 Validating {}: {:.1}%", filename, progress * 100.0);
+        }
+
+        fn on_validation_complete(&self, file: &str, valid: bool) {
+            let filename = extract_filename_from_path(file);
+            if valid {
+                println!("✅ Validation passed: {}", filename);
+            } else {
+                println!("❌ Validation failed: {}", filename);
+            }
+        }
+
+        fn on_retry_attempt(&self, url: &str, attempt: usize, max_attempts: usize) {
+            println!("🔄 Retry {}/{} for: {}",
+                attempt, max_attempts, extract_filename_from_url(url));
+        }
+
+        fn on_error(&self, url: &str, error: &str) {
+            println!("❌ Error downloading {}: {}",
+                extract_filename_from_url(url), error);
+        }
+    }
+
+    let progress_reporter = BatchProgressReporter {
+        completed: completed_downloads.clone(),
+        total: total_downloads,
     };
+
+    // Convert the progress reporter to a callback using the new trait system
+    let progress_callback = Some(progress_reporter.into_callback());
 
     // Perform batch download with async validation and concurrency limit
     let max_concurrent_downloads = 3;
     println!("🔄 Starting batch download with async validation (max {} concurrent)...", max_concurrent_downloads);
-    println!("💡 Using async validation with {} validation retries", config.validation_retries);
+    println!("💡 Using async validation with {} validation retries", validation_retries);
 
     let batch_start = Instant::now();
     let results = downloader
-        .download_batch_with_async_validation(requests, Some(progress_callback), max_concurrent_downloads)
+        .download_batch_with_async_validation(requests, progress_callback, max_concurrent_downloads)
         .await;
 
     let batch_duration = batch_start.elapsed();
@@ -192,7 +213,7 @@ async fn main() -> installer::Result<()> {
     let mut total_bytes = 0u64;
     let mut already_existed = 0;
     let mut pending_validations = 0;
-    let mut validation_retries = 0;
+    let mut validation_retry_failures = 0;
 
     println!("\n📊 Results Summary:");
     println!("{}", "─".repeat(60));
@@ -244,8 +265,8 @@ async fn main() -> installer::Result<()> {
     println!("   • Average speed: {:.2} KB/s",
         (total_bytes as f64 / 1024.0) / batch_duration.as_secs_f64());
     println!("   • Duration (including validation): {:.2?}", batch_duration);
-    println!("   • Async validation enabled: {}", config.async_validation);
-    println!("   • Max validation retries: {}", config.validation_retries);
+    println!("   • Async validation enabled: {}", async_validation);
+    println!("   • Max validation retries: {}", validation_retries);
 
     // Verify files exist
     println!("\n📁 Verifying downloaded files:");
@@ -264,22 +285,22 @@ async fn main() -> installer::Result<()> {
     for (i, result) in results.iter().enumerate() {
         if let Err(e) = result {
             match e {
-                installer::DownloadError::HttpError(http_err) => {
-                    println!("   🌐 HTTP Error in file {}: {}", i + 1, http_err);
+                installer::DownloadError::HttpRequest { url, source } => {
+                    println!("   🌐 HTTP Error in file {}: {} ({})", i + 1, url, source);
                 }
-                installer::DownloadError::ValidationError { expected, actual } => {
+                installer::DownloadError::ValidationFailed { expected, actual, .. } => {
                     println!("   ❓ Validation Error in file {}: expected '{}', got '{}'",
                         i + 1, expected, actual);
                     if actual.contains("retry") || actual.contains("retries") {
                         println!("      ➡️ This error occurred after validation retries were attempted");
-                        validation_retries += 1;
+                        validation_retry_failures += 1;
                     }
                 }
-                installer::DownloadError::SizeMismatch { expected, actual } => {
+                installer::DownloadError::SizeMismatch { expected, actual, file: _, diff: _ } => {
                     println!("   📏 Size Mismatch in file {}: expected {} bytes, got {}",
                         i + 1, expected, actual);
                 }
-                installer::DownloadError::MaxRetriesExceeded => {
+                installer::DownloadError::MaxRetriesExceeded { .. } => {
                     println!("   🔄 Max Retries Exceeded for file {}", i + 1);
                 }
                 _ => {
@@ -289,9 +310,9 @@ async fn main() -> installer::Result<()> {
         }
     }
 
-    if validation_retries > 0 {
+    if validation_retry_failures > 0 {
         println!("\n➡️ {} files failed validation even after {} retry attempts",
-            validation_retries, config.validation_retries);
+            validation_retry_failures, validation_retries);
         println!("   This demonstrates the automatic retry mechanism for validation failures.");
     }
 
@@ -305,16 +326,33 @@ async fn main() -> installer::Result<()> {
         println!("   • The async validation system allowed other downloads to continue");
     }
 
-    println!("\n🔍 Async Validation Benefits Demonstrated:");
-    println!("   • Downloads complete immediately, validation happens in background");
-    println!("   • Failed validations trigger automatic retries (up to {} attempts)", config.validation_retries);
-    println!("   • Multiple validations run concurrently (max {} at once)", config.max_concurrent_validations);
-    println!("   • Invalid files are automatically deleted before retry attempts");
-    println!("   • Total throughput improved by not blocking downloads on validation");
+    // Demonstrate the new built-in metrics system
+    println!("\n📊 Performance Metrics (New Feature!):");
+    println!("{}", "─".repeat(60));
+    let metrics_snapshot = metrics.snapshot();
+    println!("   Total Downloads: {}", metrics_snapshot.total_downloads);
+    println!("   Successful Downloads: {}", metrics_snapshot.successful_downloads);
+    println!("   Failed Downloads: {}", metrics_snapshot.failed_downloads);
+    println!("   Total Bytes: {} ({:.2} MB)",
+        metrics_snapshot.total_bytes,
+        metrics_snapshot.total_bytes as f64 / 1_000_000.0);
+    println!("   Success Rate: {:.1}%", metrics_snapshot.success_rate() * 100.0);
+    println!("   Average File Size: {:.0} bytes", metrics_snapshot.average_size());
+    println!("   Validation Failures: {}", metrics_snapshot.validation_failures);
+    println!("   Retry Attempts: {}", metrics_snapshot.retries_attempted);
+    println!("   Cache Hits: {}", metrics_snapshot.cache_hits);
 
-    println!("\n✨ Batch download with async validation example completed!");
-    println!("   This example demonstrated how validation can run in parallel with downloads,");
-    println!("   improving overall throughput while maintaining data integrity through retries.");
+    println!("\n🔍 Enhanced Features Demonstrated:");
+    println!("   • Builder Pattern: Easy configuration with presets (high_performance)");
+    println!("   • Progress Reporter Traits: Clean, composable progress tracking");
+    println!("   • Built-in Metrics: Automatic performance and reliability monitoring");
+    println!("   • Enhanced Error Context: Detailed error information with recovery suggestions");
+    println!("   • Async Validation: Non-blocking validation with automatic retries");
+    println!("   • Memory Optimization: Buffer pooling and conditional hash computation");
+
+    println!("\n✨ Enhanced batch download example completed!");
+    println!("   This example showcased the new modular, high-performance downloader API");
+    println!("   with improved developer experience and built-in observability.");
 
     Ok(())
 }
