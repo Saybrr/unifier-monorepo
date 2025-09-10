@@ -32,6 +32,9 @@ async fn main() -> installer::Result<()> {
         user_agent: "installer-example/1.0".to_string(),
         allow_resume: true,
         chunk_size: 8192,
+        max_concurrent_validations: 2,
+        async_validation: true,
+        validation_retries: 2,
     };
 
     // Create the downloader
@@ -118,6 +121,9 @@ async fn main() -> installer::Result<()> {
         }
         installer::DownloadResult::Resumed { size } => {
             println!("⏯️  Resumed and completed download ({} bytes)", size);
+        }
+        installer::DownloadResult::DownloadedPendingValidation { size, .. } => {
+            println!("⏳ Downloaded, validation was pending ({} bytes)", size);
         }
     }
 

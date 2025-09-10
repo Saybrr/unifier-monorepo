@@ -20,7 +20,7 @@ use std::time::Duration;
 use thiserror::Error;
 use tokio::fs;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use url::Url;
 
 /// Custom error types for the downloader
@@ -140,6 +140,14 @@ impl FileValidation {
         self
     }
 
+    /// Check if validation is needed
+    pub fn is_empty(&self) -> bool {
+        self.crc32.is_none()
+            && self.md5.is_none()
+            && self.sha256.is_none()
+            && self.expected_size.is_none()
+    }
+
     /// Validate a file against the configured validation parameters
     pub async fn validate_file<P: AsRef<Path>>(
         &self,
@@ -255,6 +263,66 @@ impl FileValidation {
 
         Ok(true)
     }
+
+    /// Validate file in a blocking context (optimized for CPU-intensive work)
+    pub async fn validate_file_blocking<P: AsRef<Path>>(
+        &self,
+        path: P,
+        progress_callback: Option<ProgressCallback>,
+    ) -> Result<bool> {
+        let path = path.as_ref().to_path_buf();
+        let validation = self.clone();
+        let callback = progress_callback.clone();
+
+        // Move to blocking thread to avoid blocking the async runtime
+        tokio::task::spawn_blocking(move || {
+            let rt = tokio::runtime::Handle::current();
+            rt.block_on(validation.validate_file(&path, callback))
+        })
+        .await
+        .map_err(|e| DownloadError::IoError(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            format!("Validation task failed: {}", e),
+        )))?
+    }
+}
+
+/// Validation thread pool for async validation
+pub struct ValidationPool {
+    semaphore: Arc<tokio::sync::Semaphore>,
+}
+
+impl ValidationPool {
+    pub fn new(max_concurrent: usize) -> Self {
+        Self {
+            semaphore: Arc::new(tokio::sync::Semaphore::new(max_concurrent)),
+        }
+    }
+
+    /// Spawn async validation task
+    pub fn validate_async(
+        &self,
+        validation: FileValidation,
+        file_path: PathBuf,
+        url: String,
+        request: DownloadRequest,
+        progress_callback: Option<ProgressCallback>,
+    ) -> ValidationHandle {
+        let semaphore = self.semaphore.clone();
+        let path_clone = file_path.clone();
+
+        let task_handle = tokio::spawn(async move {
+            let _permit = semaphore.acquire().await.unwrap();
+            validation.validate_file_blocking(&path_clone, progress_callback).await
+        });
+
+        ValidationHandle {
+            file_path,
+            task_handle,
+            url,
+            request,
+        }
+    }
 }
 
 /// Configuration for download operations
@@ -265,6 +333,12 @@ pub struct DownloadConfig {
     pub user_agent: String,
     pub allow_resume: bool,
     pub chunk_size: usize,
+    /// Maximum number of concurrent validation tasks
+    pub max_concurrent_validations: usize,
+    /// Whether to validate files asynchronously (non-blocking)
+    pub async_validation: bool,
+    /// Number of retry attempts for failed validations
+    pub validation_retries: usize,
 }
 
 impl Default for DownloadConfig {
@@ -275,6 +349,9 @@ impl Default for DownloadConfig {
             user_agent: "installer/0.1.0".to_string(),
             allow_resume: true,
             chunk_size: 8192,
+            max_concurrent_validations: 4,
+            async_validation: true,
+            validation_retries: 2,
         }
     }
 }
@@ -333,12 +410,37 @@ impl DownloadRequest {
     }
 }
 
+/// Handle to track async validation
+#[derive(Debug)]
+pub struct ValidationHandle {
+    pub file_path: PathBuf,
+    pub task_handle: tokio::task::JoinHandle<Result<bool>>,
+    pub url: String,
+    pub request: DownloadRequest,
+}
+
 /// Result of a download operation
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum DownloadResult {
     Downloaded { size: u64 },
     AlreadyExists { size: u64 },
     Resumed { size: u64 },
+    /// File downloaded but validation is still in progress
+    DownloadedPendingValidation {
+        size: u64,
+        validation_handle: ValidationHandle,
+    },
+}
+
+/// Intermediate result for batch operations with validation
+#[derive(Debug)]
+pub enum BatchDownloadResult {
+    Completed(Result<DownloadResult>),
+    PendingValidation {
+        size: u64,
+        validation_handle: ValidationHandle,
+        original_index: usize,
+    },
 }
 
 /// Trait for different download implementations
@@ -477,7 +579,11 @@ impl FileDownloader for HttpDownloader {
 
         // Check if file already exists and is valid
         if dest_path.exists() {
-            if request.validation.validate_file(&dest_path, progress_callback.clone()).await? {
+            if request.validation.is_empty() {
+                // No validation needed, file exists
+                let size = fs::metadata(&dest_path).await?.len();
+                return Ok(DownloadResult::AlreadyExists { size });
+            } else if request.validation.validate_file(&dest_path, progress_callback.clone()).await? {
                 let size = fs::metadata(&dest_path).await?.len();
                 return Ok(DownloadResult::AlreadyExists { size });
             } else {
@@ -493,13 +599,15 @@ impl FileDownloader for HttpDownloader {
 
         let size = self.download_file(&request.url, &dest_path, progress_callback.clone()).await?;
 
-        // Validate the downloaded file
-        if !request.validation.validate_file(&dest_path, progress_callback).await? {
-            fs::remove_file(&dest_path).await?;
-            return Err(DownloadError::ValidationError {
-                expected: "valid file".to_string(),
-                actual: "invalid file".to_string(),
-            });
+        // Validate the downloaded file (only if validation is specified)
+        if !request.validation.is_empty() {
+            if !request.validation.validate_file(&dest_path, progress_callback).await? {
+                fs::remove_file(&dest_path).await?;
+                return Err(DownloadError::ValidationError {
+                    expected: "valid file".to_string(),
+                    actual: "invalid file".to_string(),
+                });
+            }
         }
 
         Ok(DownloadResult::Downloaded { size })
@@ -553,18 +661,21 @@ impl DownloaderRegistry {
 pub struct EnhancedDownloader {
     registry: DownloaderRegistry,
     config: DownloadConfig,
+    validation_pool: ValidationPool,
 }
 
 impl EnhancedDownloader {
     pub fn new(config: DownloadConfig) -> Self {
+        let validation_pool = ValidationPool::new(config.max_concurrent_validations);
         let registry = DownloaderRegistry::new()
             .with_http_downloader(config.clone());
 
-        Self { registry, config }
+        Self { registry, config, validation_pool }
     }
 
     pub fn with_registry(registry: DownloaderRegistry, config: DownloadConfig) -> Self {
-        Self { registry, config }
+        let validation_pool = ValidationPool::new(config.max_concurrent_validations);
+        Self { registry, config, validation_pool }
     }
 
     /// Download a file with retry logic and mirror fallback
@@ -638,6 +749,168 @@ impl EnhancedDownloader {
         Err(DownloadError::MaxRetriesExceeded)
     }
 
+    /// Download with async validation option
+    pub async fn download_with_async_validation(
+        &self,
+        request: DownloadRequest,
+        progress_callback: Option<ProgressCallback>,
+    ) -> Result<DownloadResult> {
+        let filename = request.get_filename()?;
+        let dest_path = request.destination.join(&filename);
+
+        // Check if file already exists and is valid (still synchronous)
+        if dest_path.exists() {
+            if request.validation.is_empty() {
+                // No validation needed, file exists
+                let size = fs::metadata(&dest_path).await?.len();
+                return Ok(DownloadResult::AlreadyExists { size });
+            } else if request.validation.validate_file(&dest_path, progress_callback.clone()).await? {
+                let size = fs::metadata(&dest_path).await?.len();
+                return Ok(DownloadResult::AlreadyExists { size });
+            } else {
+                // Remove invalid file
+                fs::remove_file(&dest_path).await?;
+            }
+        }
+
+        // Create destination directory if it doesn't exist
+        if let Some(parent) = dest_path.parent() {
+            fs::create_dir_all(parent).await?;
+        }
+
+        // Download the file without validation
+        let size = self.download_file_only(&request, progress_callback.clone()).await?;
+
+        // Start async validation if configured and needed
+        if self.config.async_validation && !request.validation.is_empty() {
+            let validation_handle = self.validation_pool.validate_async(
+                request.validation.clone(),
+                dest_path,
+                request.url.clone(),
+                request.clone(),
+                progress_callback,
+            );
+
+            Ok(DownloadResult::DownloadedPendingValidation {
+                size,
+                validation_handle,
+            })
+        } else if !request.validation.is_empty() {
+            // Synchronous validation (existing behavior)
+            if !request.validation.validate_file(&dest_path, progress_callback).await? {
+                fs::remove_file(&dest_path).await?;
+                return Err(DownloadError::ValidationError {
+                    expected: "valid file".to_string(),
+                    actual: "invalid file".to_string(),
+                });
+            }
+            Ok(DownloadResult::Downloaded { size })
+        } else {
+            // No validation needed
+            Ok(DownloadResult::Downloaded { size })
+        }
+    }
+
+    /// Download file without validation (helper method)
+    async fn download_file_only(
+        &self,
+        request: &DownloadRequest,
+        progress_callback: Option<ProgressCallback>,
+    ) -> Result<u64> {
+        let url = request.url.clone();
+        let max_retries = self.config.max_retries;
+
+        // Custom retry loop with progress feedback
+        let mut last_error = None;
+        for attempt in 0..=max_retries {
+            if attempt > 0 {
+                if let Some(ref callback) = progress_callback {
+                    callback(ProgressEvent::RetryAttempt {
+                        url: url.clone(),
+                        attempt,
+                        max_attempts: max_retries,
+                    });
+                }
+
+                // Exponential backoff delay
+                let delay = Duration::from_millis(1000 * (1 << (attempt - 1).min(5)));
+                tokio::time::sleep(delay).await;
+            }
+
+            // Create a minimal request for just downloading
+            let download_request = DownloadRequest {
+                validation: FileValidation::new(), // No validation
+                ..request.clone()
+            };
+
+            match self.registry.attempt_download(&download_request, progress_callback.clone()).await {
+                Ok(DownloadResult::Downloaded { size }) => return Ok(size),
+                Ok(DownloadResult::Resumed { size }) => return Ok(size),
+                Ok(DownloadResult::AlreadyExists { size }) => return Ok(size),
+                Ok(DownloadResult::DownloadedPendingValidation { .. }) => {
+                    // This shouldn't happen since we disabled validation
+                    return Err(DownloadError::IoError(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        "Unexpected pending validation state",
+                    )));
+                }
+                Err(e) => {
+                    last_error = Some(e);
+                    if attempt < max_retries {
+                        continue;
+                    }
+                }
+            }
+        }
+
+        // All retries failed, try mirror if available
+        if let Some(ref mirror_url) = request.mirror_url {
+            info!("Primary download failed, trying mirror URL");
+
+            if let Some(ref callback) = progress_callback {
+                callback(ProgressEvent::RetryAttempt {
+                    url: url.clone(),
+                    attempt: 1,
+                    max_attempts: 1,
+                });
+            }
+
+            let mirror_request = DownloadRequest {
+                url: mirror_url.clone(),
+                mirror_url: None,
+                validation: FileValidation::new(), // No validation
+                ..request.clone()
+            };
+
+            match self.registry.attempt_download(&mirror_request, progress_callback.clone()).await {
+                Ok(DownloadResult::Downloaded { size }) => return Ok(size),
+                Ok(DownloadResult::Resumed { size }) => return Ok(size),
+                Ok(DownloadResult::AlreadyExists { size }) => return Ok(size),
+                Ok(DownloadResult::DownloadedPendingValidation { .. }) => {
+                    return Err(DownloadError::IoError(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        "Unexpected pending validation state",
+                    )));
+                }
+                Err(e) => {
+                    last_error = Some(e);
+                }
+            }
+        }
+
+        // No mirror available or mirror failed, return error
+        if let Some(ref callback) = progress_callback {
+            if let Some(ref error) = last_error {
+                callback(ProgressEvent::Error {
+                    url,
+                    error: error.to_string(),
+                });
+            }
+        }
+
+        Err(DownloadError::MaxRetriesExceeded)
+    }
+
     /// Download multiple files concurrently
     pub async fn download_batch(
         &self,
@@ -657,6 +930,203 @@ impl EnhancedDownloader {
             .buffer_unordered(max_concurrent)
             .collect()
             .await
+    }
+
+    /// Download multiple files with async validation and validation retry
+    pub async fn download_batch_with_async_validation(
+        &self,
+        requests: Vec<DownloadRequest>,
+        progress_callback: Option<ProgressCallback>,
+        max_concurrent_downloads: usize,
+    ) -> Vec<Result<DownloadResult>> {
+        use futures::stream::{self, StreamExt};
+        use std::collections::VecDeque;
+
+        // Initial downloads with intermediate results
+        let intermediate_results = stream::iter(requests.into_iter().enumerate())
+            .map(|(index, request)| {
+                let progress_cb = progress_callback.clone();
+                async move {
+                    if self.config.async_validation {
+                        match self.download_with_async_validation(request, progress_cb).await {
+                            Ok(DownloadResult::DownloadedPendingValidation { size, validation_handle }) => {
+                                BatchDownloadResult::PendingValidation {
+                                    size,
+                                    validation_handle,
+                                    original_index: index,
+                                }
+                            }
+                            other => BatchDownloadResult::Completed(other),
+                        }
+                    } else {
+                        BatchDownloadResult::Completed(self.download(request, progress_cb).await)
+                    }
+                }
+            })
+            .buffer_unordered(max_concurrent_downloads)
+            .collect::<Vec<_>>()
+            .await;
+
+        // Separate completed results from pending validations
+        let total_requests = intermediate_results.len();
+        let mut final_results: Vec<Option<Result<DownloadResult>>> = (0..total_requests).map(|_| None).collect();
+        let mut pending_validations = Vec::new();
+        let mut next_index = 0;
+
+        for intermediate_result in intermediate_results {
+            match intermediate_result {
+                BatchDownloadResult::Completed(result) => {
+                    // For completed results, we'll assign them sequentially
+                    // since we've lost the original index mapping
+                    while next_index < final_results.len() && final_results[next_index].is_some() {
+                        next_index += 1;
+                    }
+                    if next_index < final_results.len() {
+                        final_results[next_index] = Some(result);
+                    } else {
+                        final_results.push(Some(result));
+                    }
+                }
+                BatchDownloadResult::PendingValidation { size, validation_handle, original_index } => {
+                    pending_validations.push((original_index, size, validation_handle));
+                }
+            }
+        }
+
+        // Handle validation results and retries
+        if self.config.async_validation && !pending_validations.is_empty() {
+            let mut retry_queue: VecDeque<(usize, DownloadRequest)> = VecDeque::new();
+
+            // Wait for all initial validations to complete
+            for (original_index, size, validation_handle) in pending_validations {
+                match validation_handle.task_handle.await {
+                    Ok(Ok(true)) => {
+                        // Validation passed
+                        final_results[original_index] = Some(Ok(DownloadResult::Downloaded { size }));
+                    }
+                    Ok(Ok(false)) | Ok(Err(_)) => {
+                        // Validation failed, queue for retry if retries are enabled
+                        if self.config.validation_retries > 0 {
+                            warn!("Validation failed for {}, queuing for retry", validation_handle.url);
+
+                            // Remove the invalid file
+                            if let Err(e) = fs::remove_file(&validation_handle.file_path).await {
+                                warn!("Failed to remove invalid file {}: {}", validation_handle.file_path.display(), e);
+                            }
+
+                            retry_queue.push_back((original_index, validation_handle.request));
+                        } else {
+                            // No retries, mark as validation error
+                            final_results[original_index] = Some(Err(DownloadError::ValidationError {
+                                expected: "valid file".to_string(),
+                                actual: "invalid file".to_string(),
+                            }));
+                        }
+                    }
+                    Err(e) => {
+                        // Task panicked or was cancelled
+                        warn!("Validation task failed for {}: {}", validation_handle.url, e);
+                        if self.config.validation_retries > 0 {
+                            retry_queue.push_back((original_index, validation_handle.request));
+                        } else {
+                            final_results[original_index] = Some(Err(DownloadError::IoError(std::io::Error::new(
+                                std::io::ErrorKind::Other,
+                                format!("Validation task failed: {}", e),
+                            ))));
+                        }
+                    }
+                }
+            }
+
+            // Process retry queue
+            let mut retry_attempts = 0;
+            while !retry_queue.is_empty() && retry_attempts < self.config.validation_retries {
+                retry_attempts += 1;
+                info!("Starting validation retry attempt {} of {}", retry_attempts, self.config.validation_retries);
+
+                let current_retries: Vec<_> = retry_queue.drain(..).collect();
+                let retry_results = stream::iter(current_retries.iter().cloned())
+                    .map(|(original_index, request)| {
+                        let progress_cb = progress_callback.clone();
+                        async move {
+                            let result = self.download_with_async_validation(request, progress_cb).await;
+                            (original_index, result)
+                        }
+                    })
+                    .buffer_unordered(max_concurrent_downloads)
+                    .collect::<Vec<_>>()
+                    .await;
+
+                // Process retry results
+                let mut new_pending_validations = Vec::new();
+
+                for (original_index, retry_result) in retry_results {
+                    match retry_result {
+                        Ok(DownloadResult::DownloadedPendingValidation { size, validation_handle }) => {
+                            new_pending_validations.push((original_index, size, validation_handle));
+                        }
+                        Ok(success_result) => {
+                            // Direct success
+                            final_results[original_index] = Some(Ok(success_result));
+                        }
+                        Err(e) => {
+                            final_results[original_index] = Some(Err(e));
+                        }
+                    }
+                }
+
+                // Wait for retry validations
+                for (original_index, size, validation_handle) in new_pending_validations {
+                    match validation_handle.task_handle.await {
+                        Ok(Ok(true)) => {
+                            // Retry validation passed
+                            final_results[original_index] = Some(Ok(DownloadResult::Downloaded { size }));
+                        }
+                        Ok(Ok(false)) | Ok(Err(_)) => {
+                            // Retry validation failed, queue for another retry if possible
+                            if retry_attempts < self.config.validation_retries {
+                                if let Err(e) = fs::remove_file(&validation_handle.file_path).await {
+                                    warn!("Failed to remove invalid file after retry {}: {}", validation_handle.file_path.display(), e);
+                                }
+                                retry_queue.push_back((original_index, validation_handle.request));
+                            } else {
+                                final_results[original_index] = Some(Err(DownloadError::ValidationError {
+                                    expected: "valid file".to_string(),
+                                    actual: "invalid file after retries".to_string(),
+                                }));
+                            }
+                        }
+                        Err(e) => {
+                            warn!("Retry validation task failed: {}", e);
+                            final_results[original_index] = Some(Err(DownloadError::IoError(std::io::Error::new(
+                                std::io::ErrorKind::Other,
+                                format!("Retry validation task failed: {}", e),
+                            ))));
+                        }
+                    }
+                }
+            }
+
+            // Mark any remaining failed retries
+            for (original_index, failed_request) in retry_queue {
+                warn!("Max validation retries exceeded for {}", failed_request.url);
+                final_results[original_index] = Some(Err(DownloadError::ValidationError {
+                    expected: "valid file".to_string(),
+                    actual: "max validation retries exceeded".to_string(),
+                }));
+            }
+        }
+
+        // Convert Option<Result<DownloadResult>> to Vec<Result<DownloadResult>>
+        // Fill any remaining None values with errors
+        final_results.into_iter()
+            .map(|opt_result| {
+                opt_result.unwrap_or_else(|| Err(DownloadError::IoError(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    "Download result was not properly set".to_string(),
+                ))))
+            })
+            .collect()
     }
 }
 

@@ -28,17 +28,20 @@ async fn main() -> installer::Result<()> {
     let temp_dir = tempdir().unwrap();
     println!("📁 Download directory: {}", temp_dir.path().display());
 
-    // Configure the downloader
+    // Configure the downloader with async validation enabled
     let config = DownloadConfig {
         max_retries: 3,
         timeout: Duration::from_secs(60),
         user_agent: "batch-downloader-example/1.0".to_string(),
         allow_resume: true,
         chunk_size: 8192,
+        max_concurrent_validations: 2,
+        async_validation: true,
+        validation_retries: 2,
     };
 
     // Create the downloader
-    let downloader = EnhancedDownloader::new(config);
+    let downloader = EnhancedDownloader::new(config.clone());
 
     // Create multiple download requests with different file sizes
     let requests = vec![
@@ -85,6 +88,17 @@ async fn main() -> installer::Result<()> {
         .with_validation(
             FileValidation::new()
                 .with_expected_size(2048)
+        ),
+
+        // File with intentional validation failure to demonstrate retry
+        DownloadRequest::new(
+            "http://localhost:80/bytes/5120",
+            temp_dir.path()
+        )
+        .with_filename("validation_retry_test.bin")
+        .with_validation(
+            FileValidation::new()
+                .with_expected_size(1024) // Wrong size to trigger validation failure
         ),
 
         // File from a different test endpoint
@@ -157,23 +171,26 @@ async fn main() -> installer::Result<()> {
         })
     };
 
-    // Perform batch download with concurrency limit
+    // Perform batch download with async validation and concurrency limit
     let max_concurrent_downloads = 3;
-    println!("🔄 Starting batch download (max {} concurrent)...", max_concurrent_downloads);
+    println!("🔄 Starting batch download with async validation (max {} concurrent)...", max_concurrent_downloads);
+    println!("💡 Using async validation with {} validation retries", config.validation_retries);
 
     let batch_start = Instant::now();
     let results = downloader
-        .download_batch(requests, Some(progress_callback), max_concurrent_downloads)
+        .download_batch_with_async_validation(requests, Some(progress_callback), max_concurrent_downloads)
         .await;
 
     let batch_duration = batch_start.elapsed();
-    println!("\n🎯 Batch download completed in {:.2?}", batch_duration);
+    println!("\n🎯 Batch download and validation completed in {:.2?}", batch_duration);
 
     // Analyze results
     let mut successful_downloads = 0;
     let mut failed_downloads = 0;
     let mut total_bytes = 0u64;
     let mut already_existed = 0;
+    let mut pending_validations = 0;
+    let mut validation_retries = 0;
 
     println!("\n📊 Results Summary:");
     println!("{}", "─".repeat(60));
@@ -197,6 +214,12 @@ async fn main() -> installer::Result<()> {
                         total_bytes += size;
                         println!("⏯️  File {}: Resumed and completed ({} bytes)", i + 1, size);
                     }
+                    DownloadResult::DownloadedPendingValidation { size, .. } => {
+                        // This should not happen with the new implementation since we wait for validation
+                        pending_validations += 1;
+                        total_bytes += size;
+                        println!("⏳ File {}: Downloaded, validation was pending ({} bytes)", i + 1, size);
+                    }
                 }
             }
             Err(e) => {
@@ -212,10 +235,15 @@ async fn main() -> installer::Result<()> {
     println!("   • Successful: {}", successful_downloads);
     println!("   • Already existed: {}", already_existed);
     println!("   • Failed: {}", failed_downloads);
-    println!("   • Total bytes downloaded: {} ({:.2} KB)", total_bytes, total_bytes as f64 / 1024.0);
+    if pending_validations > 0 {
+        println!("   • Pending validations: {}", pending_validations);
+    }
+    println!("   • Total bytes processed: {} ({:.2} KB)", total_bytes, total_bytes as f64 / 1024.0);
     println!("   • Average speed: {:.2} KB/s",
         (total_bytes as f64 / 1024.0) / batch_duration.as_secs_f64());
-    println!("   • Duration: {:.2?}", batch_duration);
+    println!("   • Duration (including validation): {:.2?}", batch_duration);
+    println!("   • Async validation enabled: {}", config.async_validation);
+    println!("   • Max validation retries: {}", config.validation_retries);
 
     // Verify files exist
     println!("\n📁 Verifying downloaded files:");
@@ -229,8 +257,8 @@ async fn main() -> installer::Result<()> {
         }
     }
 
-    // Demonstrate error handling patterns
-    println!("\n🔍 Error handling examples:");
+    // Demonstrate error handling patterns and validation retry behavior
+    println!("\n🔍 Error handling and validation retry examples:");
     for (i, result) in results.iter().enumerate() {
         if let Err(e) = result {
             match e {
@@ -240,6 +268,10 @@ async fn main() -> installer::Result<()> {
                 installer::DownloadError::ValidationError { expected, actual } => {
                     println!("   ❓ Validation Error in file {}: expected '{}', got '{}'",
                         i + 1, expected, actual);
+                    if actual.contains("retry") || actual.contains("retries") {
+                        println!("      ➡️ This error occurred after validation retries were attempted");
+                        validation_retries += 1;
+                    }
                 }
                 installer::DownloadError::SizeMismatch { expected, actual } => {
                     println!("   📏 Size Mismatch in file {}: expected {} bytes, got {}",
@@ -255,13 +287,32 @@ async fn main() -> installer::Result<()> {
         }
     }
 
-    if failed_downloads == 0 {
-        println!("\n🎉 All downloads completed successfully!");
-    } else {
-        println!("\n⚠️  Some downloads failed, but batch operation completed.");
+    if validation_retries > 0 {
+        println!("\n➡️ {} files failed validation even after {} retry attempts",
+            validation_retries, config.validation_retries);
+        println!("   This demonstrates the automatic retry mechanism for validation failures.");
     }
 
-    println!("✨ Batch download example completed!");
+    if failed_downloads == 0 {
+        println!("\n🎉 All downloads and validations completed successfully!");
+        println!("   • Async validation allowed downloads to complete without blocking");
+        println!("   • All files passed validation on the first attempt or after retries");
+    } else {
+        println!("\n⚠️  Some downloads or validations failed, but batch operation completed.");
+        println!("   • Failed items may include validation failures after all retry attempts");
+        println!("   • The async validation system allowed other downloads to continue");
+    }
+
+    println!("\n🔍 Async Validation Benefits Demonstrated:");
+    println!("   • Downloads complete immediately, validation happens in background");
+    println!("   • Failed validations trigger automatic retries (up to {} attempts)", config.validation_retries);
+    println!("   • Multiple validations run concurrently (max {} at once)", config.max_concurrent_validations);
+    println!("   • Invalid files are automatically deleted before retry attempts");
+    println!("   • Total throughput improved by not blocking downloads on validation");
+
+    println!("\n✨ Batch download with async validation example completed!");
+    println!("   This example demonstrated how validation can run in parallel with downloads,");
+    println!("   improving overall throughput while maintaining data integrity through retries.");
 
     Ok(())
 }
