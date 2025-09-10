@@ -20,7 +20,6 @@ use std::time::Duration;
 use thiserror::Error;
 use tokio::fs;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio_retry::{strategy::ExponentialBackoff, Retry};
 use tracing::{error, info};
 use url::Url;
 
@@ -393,14 +392,7 @@ impl HttpDownloader {
         };
 
         // Get file size for progress tracking
-        let total_size = self.get_file_size(url).await?;
-
-        if let Some(ref callback) = progress_callback {
-            callback(ProgressEvent::DownloadStarted {
-                url: url.to_string(),
-                total_size,
-            });
-        }
+        let mut total_size = self.get_file_size(url).await?;
 
         // Build request with range header for resume
         let mut request = self.client.get(url);
@@ -410,6 +402,18 @@ impl HttpDownloader {
 
         let response = request.send().await?;
         response.error_for_status_ref()?;
+
+        // If we didn't get size from HEAD request, try to get it from GET response
+        if total_size.is_none() {
+            total_size = response.content_length();
+        }
+
+        if let Some(ref callback) = progress_callback {
+            callback(ProgressEvent::DownloadStarted {
+                url: url.to_string(),
+                total_size,
+            });
+        }
 
         // Open file for writing
         let mut file = if start_byte > 0 {
@@ -569,54 +573,69 @@ impl EnhancedDownloader {
         request: DownloadRequest,
         progress_callback: Option<ProgressCallback>,
     ) -> Result<DownloadResult> {
-        let retry_strategy = ExponentialBackoff::from_millis(1000)
-            .max_delay(Duration::from_secs(30))
-            .take(self.config.max_retries);
-
         let url = request.url.clone();
-        let progress_cb = progress_callback.clone();
+        let max_retries = self.config.max_retries;
 
-        let result = Retry::spawn(retry_strategy, || {
-            let request = request.clone();
-            let progress_cb = progress_cb.clone();
-
-            async move {
-                self.registry.attempt_download(&request, progress_cb.clone()).await
-            }
-        }).await;
-
-        match result {
-            Ok(success) => Ok(success),
-            Err(_) if request.mirror_url.is_some() => {
-                info!("Primary download failed, trying mirror URL");
-
+        // Custom retry loop with progress feedback
+        let mut last_error = None;
+        for attempt in 0..=max_retries {
+            if attempt > 0 {
                 if let Some(ref callback) = progress_callback {
                     callback(ProgressEvent::RetryAttempt {
                         url: url.clone(),
-                        attempt: 1,
-                        max_attempts: 1,
+                        attempt,
+                        max_attempts: max_retries,
                     });
                 }
 
-                let mirror_request = DownloadRequest {
-                    url: request.mirror_url.unwrap(),
-                    mirror_url: None,
-                    ..request
-                };
-
-                // Use registry directly to avoid recursion
-                self.registry.attempt_download(&mirror_request, progress_callback).await
+                // Exponential backoff delay
+                let delay = Duration::from_millis(1000 * (1 << (attempt - 1).min(5)));
+                tokio::time::sleep(delay).await;
             }
-            Err(e) => {
-                if let Some(ref callback) = progress_callback {
-                    callback(ProgressEvent::Error {
-                        url,
-                        error: e.to_string(),
-                    });
+
+            match self.registry.attempt_download(&request, progress_callback.clone()).await {
+                Ok(result) => return Ok(result),
+                Err(e) => {
+                    last_error = Some(e);
+                    if attempt < max_retries {
+                        continue;
+                    }
                 }
-                Err(DownloadError::MaxRetriesExceeded)
             }
         }
+
+        // All retries failed, try mirror if available
+        if request.mirror_url.is_some() {
+            info!("Primary download failed, trying mirror URL");
+
+            if let Some(ref callback) = progress_callback {
+                callback(ProgressEvent::RetryAttempt {
+                    url: url.clone(),
+                    attempt: 1,
+                    max_attempts: 1,
+                });
+            }
+
+            let mirror_request = DownloadRequest {
+                url: request.mirror_url.unwrap(),
+                mirror_url: None,
+                ..request
+            };
+
+            return self.registry.attempt_download(&mirror_request, progress_callback).await;
+        }
+
+        // No mirror available, return error
+        if let Some(ref callback) = progress_callback {
+            if let Some(ref error) = last_error {
+                callback(ProgressEvent::Error {
+                    url,
+                    error: error.to_string(),
+                });
+            }
+        }
+
+        Err(DownloadError::MaxRetriesExceeded)
     }
 
     /// Download multiple files concurrently

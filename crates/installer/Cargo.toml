@@ -33,6 +33,7 @@ tempfile = "3.8"
 
 # Logging
 tracing = "0.1"
+tracing-subscriber = "0.3"
 
 # URL parsing
 url = "2.5"
