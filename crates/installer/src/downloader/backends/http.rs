@@ -1,10 +1,9 @@
 //! HTTP-based file downloader with resume support
 
 use crate::downloader::{
-    DownloadRequest, DownloadResult, FileDownloader,
+    core::{DownloadRequest, DownloadResult, FileValidation, DownloadError, Result, ProgressCallback, ProgressEvent},
     config::DownloadConfig,
-    error::{DownloadError, Result},
-    progress::{ProgressCallback, ProgressEvent},
+    registry::FileDownloader,
 };
 use async_trait::async_trait;
 use futures::StreamExt;
@@ -178,7 +177,7 @@ impl FileDownloader for HttpDownloader {
                     fs::remove_file(&dest_path).await?;
                     return Err(DownloadError::ValidationFailed {
                         file: dest_path.clone(),
-                        validation_type: crate::downloader::error::ValidationType::Size, // Default validation type
+                        validation_type: crate::downloader::core::ValidationType::Size, // Default validation type
                         expected: "valid file".to_string(),
                         actual: "invalid file".to_string(),
                         suggestion: "Check file integrity or download again".to_string(),
@@ -217,7 +216,7 @@ impl FileDownloader for HttpDownloader {
     async fn check_existing_file(
         &self,
         dest_path: &std::path::Path,
-        validation: &crate::downloader::validation::FileValidation,
+        validation: &FileValidation,
         progress_callback: Option<ProgressCallback>,
     ) -> Result<Option<DownloadResult>> {
         if dest_path.exists() {

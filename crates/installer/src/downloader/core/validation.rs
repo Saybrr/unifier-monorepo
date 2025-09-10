@@ -1,6 +1,7 @@
 //! File validation with optimized memory usage and parallel computation
 
-use crate::downloader::{DownloadRequest, error::{DownloadError, Result}, progress::ProgressCallback};
+use crate::downloader::core::{DownloadRequest, error::{DownloadError, Result}};
+use crate::downloader::core::progress::ProgressCallback;
 use crc32fast::Hasher as Crc32Hasher;
 use digest::Digest;
 use once_cell::sync::Lazy;
@@ -96,7 +97,7 @@ impl FileValidation {
         let file_size = fs::metadata(path).await?.len();
 
         if let Some(ref callback) = progress_callback {
-            callback(crate::downloader::progress::ProgressEvent::ValidationStarted {
+            callback(crate::downloader::core::progress::ProgressEvent::ValidationStarted {
                 file: path.display().to_string(),
             });
         }
@@ -105,7 +106,7 @@ impl FileValidation {
         if let Some(expected_size) = self.expected_size {
             if file_size != expected_size {
                 if let Some(ref callback) = progress_callback {
-                    callback(crate::downloader::progress::ProgressEvent::ValidationComplete {
+                    callback(crate::downloader::core::progress::ProgressEvent::ValidationComplete {
                         file: path.display().to_string(),
                         valid: false,
                     });
@@ -255,7 +256,7 @@ impl FileValidation {
 
             if let Some(ref callback) = progress_callback {
                 let progress = bytes_read_total as f64 / file_size as f64;
-                callback(crate::downloader::progress::ProgressEvent::ValidationProgress {
+                callback(crate::downloader::core::progress::ProgressEvent::ValidationProgress {
                     file: path.display().to_string(),
                     progress,
                 });
@@ -301,7 +302,7 @@ impl FileValidation {
         progress_callback: Option<ProgressCallback>,
     ) {
         if let Some(ref callback) = progress_callback {
-            callback(crate::downloader::progress::ProgressEvent::ValidationComplete {
+            callback(crate::downloader::core::progress::ProgressEvent::ValidationComplete {
                 file: path.as_ref().display().to_string(),
                 valid,
             });

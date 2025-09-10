@@ -2,9 +2,9 @@
 
 use super::*;
 use crate::downloader::{
-    error::{ErrorSeverity, FileOperation, ValidationType},
-    progress::{IntoProgressCallback, NullProgressReporter, ConsoleProgressReporter, CompositeProgressReporter},
+    core::{ErrorSeverity, FileOperation, ValidationType, IntoProgressCallback, NullProgressReporter, ConsoleProgressReporter, CompositeProgressReporter},
 };
+use std::path::PathBuf;
 use crc32fast::Hasher as Crc32Hasher;
 use std::sync::{Arc, Mutex};
 use tempfile::{tempdir, TempDir};
