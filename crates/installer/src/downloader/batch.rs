@@ -5,7 +5,7 @@ use crate::downloader::{
     config::DownloadConfig,
     error::{DownloadError, Result},
     progress::{ProgressCallback, ProgressEvent},
-    validation::{FileValidation, ValidationHandle, ValidationPool},
+    validation::{ValidationHandle, ValidationPool},
 };
 use futures::stream::{self, StreamExt};
 use std::collections::VecDeque;
@@ -237,30 +237,23 @@ pub async fn download_with_async_validation(
     let filename = request.get_filename()?;
     let dest_path = request.destination.join(&filename);
 
-    // Check if file already exists and is valid (still synchronous)
-    if dest_path.exists() {
-        if request.validation.is_empty() {
-            // No validation needed, file exists
-            let size = fs::metadata(&dest_path).await?.len();
-            metrics.record_cache_hit(size);
-            return Ok(DownloadResult::AlreadyExists { size });
-        } else if request.validation.validate_file(&dest_path, progress_callback.clone()).await? {
-            let size = fs::metadata(&dest_path).await?.len();
-            metrics.record_cache_hit(size);
-            return Ok(DownloadResult::AlreadyExists { size });
-        } else {
-            // Remove invalid file
-            fs::remove_file(&dest_path).await?;
-        }
+    // Check if file already exists and is valid
+    let downloader = registry.find_downloader(&request.url).await?;
+    if let Some(existing_result) = downloader.check_existing_file(
+        &dest_path,
+        &request.validation,
+        progress_callback.clone()
+    ).await? {
+        let size = match &existing_result {
+            DownloadResult::AlreadyExists { size } => *size,
+            _ => 0, // This shouldn't happen with check_existing_file
+        };
+        metrics.record_cache_hit(size);
+        return Ok(existing_result);
     }
 
-    // Create destination directory if it doesn't exist
-    if let Some(parent) = dest_path.parent() {
-        fs::create_dir_all(parent).await?;
-    }
-
-    // Download the file without validation
-    let size = download_file_only(registry, config, metrics, &request, progress_callback.clone()).await?;
+    // Download the file without validation using pure download
+    let size = download_file_with_retry(registry, config, metrics, &request, progress_callback.clone()).await?;
 
     // Start async validation if configured and needed
     if config.async_validation && !request.validation.is_empty() {
@@ -296,8 +289,8 @@ pub async fn download_with_async_validation(
     }
 }
 
-/// Download file without validation (helper function)
-async fn download_file_only(
+/// Download file with retry logic - pure download without validation
+async fn download_file_with_retry(
     registry: &DownloaderRegistry,
     config: &DownloadConfig,
     metrics: &DownloadMetrics,
@@ -306,6 +299,8 @@ async fn download_file_only(
 ) -> Result<u64> {
     let url = request.url.clone();
     let max_retries = config.max_retries;
+    let filename = request.get_filename()?;
+    let dest_path = request.destination.join(&filename);
 
     // Custom retry loop with progress feedback
     let mut last_error = None;
@@ -326,23 +321,21 @@ async fn download_file_only(
             tokio::time::sleep(delay).await;
         }
 
-        // Create a minimal request for just downloading
-        let download_request = DownloadRequest {
-            validation: FileValidation::new(), // No validation
-            ..request.clone()
+        // Use pure download method - no validation, no request cloning
+        let downloader = match registry.find_downloader(&url).await {
+            Ok(d) => d,
+            Err(e) => {
+                last_error = Some(e);
+                if attempt < max_retries {
+                    continue;
+                }
+                break;
+            }
         };
-
-        match registry.attempt_download(&download_request, progress_callback.clone()).await {
-            Ok(DownloadResult::Downloaded { size }) => return Ok(size),
-            Ok(DownloadResult::Resumed { size }) => return Ok(size),
-            Ok(DownloadResult::AlreadyExists { size }) => return Ok(size),
-            Ok(DownloadResult::DownloadedPendingValidation { .. }) => {
-                // This shouldn't happen since we disabled validation
-                return Err(DownloadError::ValidationTaskFailed {
-                    file: request.destination.join(request.get_filename().unwrap_or_else(|_| "unknown".to_string())),
-                    reason: "Unexpected pending validation state".to_string(),
-                    source: None,
-                });
+        match downloader.download_helper(&url, &dest_path, progress_callback.clone()).await {
+            Ok(size) => {
+                metrics.record_download_completed(size);
+                return Ok(size);
             }
             Err(e) => {
                 last_error = Some(e);
@@ -365,23 +358,17 @@ async fn download_file_only(
             });
         }
 
-        let mirror_request = DownloadRequest {
-            url: mirror_url.clone(),
-            mirror_url: None,
-            validation: FileValidation::new(), // No validation
-            ..request.clone()
-        };
-
-        match registry.attempt_download(&mirror_request, progress_callback.clone()).await {
-            Ok(DownloadResult::Downloaded { size }) => return Ok(size),
-            Ok(DownloadResult::Resumed { size }) => return Ok(size),
-            Ok(DownloadResult::AlreadyExists { size }) => return Ok(size),
-            Ok(DownloadResult::DownloadedPendingValidation { .. }) => {
-                return Err(DownloadError::ValidationTaskFailed {
-                    file: request.destination.join(request.get_filename().unwrap_or_else(|_| "unknown".to_string())),
-                    reason: "Unexpected pending validation state".to_string(),
-                    source: None,
-                });
+        match registry.find_downloader(mirror_url).await {
+            Ok(mirror_downloader) => {
+                match mirror_downloader.download_helper(mirror_url, &dest_path, progress_callback.clone()).await {
+                    Ok(size) => {
+                        metrics.record_download_completed(size);
+                        return Ok(size);
+                    }
+                    Err(e) => {
+                        last_error = Some(e);
+                    }
+                }
             }
             Err(e) => {
                 last_error = Some(e);
@@ -390,6 +377,8 @@ async fn download_file_only(
     }
 
     // No mirror available or mirror failed, return error
+    metrics.record_download_failed();
+
     if let Some(ref callback) = progress_callback {
         if let Some(ref error) = last_error {
             callback(ProgressEvent::Error {

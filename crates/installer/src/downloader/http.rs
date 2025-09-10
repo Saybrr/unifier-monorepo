@@ -149,6 +149,7 @@ impl HttpDownloader {
     }
 }
 
+
 #[async_trait]
 impl FileDownloader for HttpDownloader {
     async fn download(
@@ -162,31 +163,13 @@ impl FileDownloader for HttpDownloader {
 
             debug!("Downloading {} to {}", request.url, dest_path.display());
 
-            // Check if file already exists and is valid
-            if dest_path.exists() {
-                let size = fs::metadata(&dest_path).await?.len();
-
-                if request.validation.is_empty() {
-                    // No validation needed, file exists
-                    debug!("File exists and no validation required");
-                    return Ok(DownloadResult::AlreadyExists { size });
-                } else if request.validation.validate_file(&dest_path, progress_callback.clone()).await? {
-                    debug!("File exists and is valid");
-                    return Ok(DownloadResult::AlreadyExists { size });
-                } else {
-                    // Remove invalid file
-                    warn!("Existing file is invalid, removing: {}", dest_path.display());
-                    fs::remove_file(&dest_path).await?;
-                }
+            // Check existing file first
+            if let Some(result) = self.check_existing_file(&dest_path, &request.validation, progress_callback.clone()).await? {
+                return Ok(result);
             }
 
-            // Create destination directory if it doesn't exist
-            if let Some(parent) = dest_path.parent() {
-                fs::create_dir_all(parent).await?;
-                debug!("Created directory: {}", parent.display());
-            }
-
-            let size = self.download_file(&request.url, &dest_path, progress_callback.clone()).await?;
+            // Download the file
+            let size = self.download_helper(&request.url, &dest_path, progress_callback.clone()).await?;
 
             // Validate the downloaded file (only if validation is specified)
             if !request.validation.is_empty() {
@@ -208,6 +191,52 @@ impl FileDownloader for HttpDownloader {
         }
         .instrument(info_span!("http_download", url = %request.url))
         .await
+    }
+
+    /// Download file only without any validation - pure download logic
+    async fn download_helper(
+        &self,
+        url: &str,
+        dest_path: &std::path::Path,
+        progress_callback: Option<ProgressCallback>,
+    ) -> Result<u64> {
+        debug!("Download: {} to {}", url, dest_path.display());
+
+        // Create destination directory if it doesn't exist
+        if let Some(parent) = dest_path.parent() {
+            fs::create_dir_all(parent).await?;
+            debug!("Created directory: {}", parent.display());
+        }
+
+        let size = self.download_file(url, dest_path, progress_callback).await?;
+        debug!("Pure download completed: {} bytes", size);
+        Ok(size)
+    }
+
+    /// Check if file exists and handle validation if needed
+    async fn check_existing_file(
+        &self,
+        dest_path: &std::path::Path,
+        validation: &crate::downloader::validation::FileValidation,
+        progress_callback: Option<ProgressCallback>,
+    ) -> Result<Option<DownloadResult>> {
+        if dest_path.exists() {
+            let size = fs::metadata(dest_path).await?.len();
+
+            if validation.is_empty() {
+                // No validation needed, file exists
+                debug!("File exists and no validation required");
+                return Ok(Some(DownloadResult::AlreadyExists { size }));
+            } else if validation.validate_file(dest_path, progress_callback).await? {
+                debug!("File exists and is valid");
+                return Ok(Some(DownloadResult::AlreadyExists { size }));
+            } else {
+                // Remove invalid file
+                warn!("Existing file is invalid, removing: {}", dest_path.display());
+                fs::remove_file(dest_path).await?;
+            }
+        }
+        Ok(None)
     }
 
     fn supports_url(&self, url: &str) -> bool {

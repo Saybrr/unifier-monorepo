@@ -102,6 +102,22 @@ pub trait FileDownloader: Send + Sync {
         progress_callback: Option<ProgressCallback>,
     ) -> Result<DownloadResult>;
 
+    /// Download file without any validation - pure download logic
+    async fn download_helper(
+        &self,
+        url: &str,
+        dest_path: &std::path::Path,
+        progress_callback: Option<ProgressCallback>,
+    ) -> Result<u64>;
+
+    /// Check if file exists and handle validation if needed
+    async fn check_existing_file(
+        &self,
+        dest_path: &std::path::Path,
+        validation: &FileValidation,
+        progress_callback: Option<ProgressCallback>,
+    ) -> Result<Option<DownloadResult>>;
+
     fn supports_url(&self, url: &str) -> bool;
 }
 
@@ -150,6 +166,7 @@ impl DownloaderRegistry {
         let downloader = self.find_downloader(&request.url).await?;
         downloader.download(request, progress_callback).await
     }
+
 }
 
 impl Default for DownloaderRegistry {
