@@ -1,6 +1,7 @@
 //! Comprehensive unit tests for the downloader module
 
 use super::*;
+use crc32fast::Hasher as Crc32Hasher;
 use std::sync::{Arc, Mutex};
 use tempfile::{tempdir, TempDir};
 use wiremock::{

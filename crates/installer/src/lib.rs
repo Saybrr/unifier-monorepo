@@ -8,14 +8,17 @@
 //!
 //! ```rust,no_run
 //! use installer::{
-//!     DownloadConfig, DownloadRequest, EnhancedDownloader,
-//!     FileValidation, ProgressEvent
+//!     DownloadConfigBuilder, DownloadRequest, EnhancedDownloader,
+//!     FileValidation, ProgressEvent, ConsoleProgressReporter, IntoProgressCallback
 //! };
 //! use std::sync::Arc;
 //!
 //! # async fn example() -> installer::Result<()> {
-//! // Create a download configuration
-//! let config = DownloadConfig::default();
+//! // Create a download configuration using the builder
+//! let config = DownloadConfigBuilder::new()
+//!     .high_performance()
+//!     .timeout(std::time::Duration::from_secs(60))
+//!     .build();
 //!
 //! // Create the downloader
 //! let downloader = EnhancedDownloader::new(config);
@@ -34,30 +37,12 @@
 //! .with_mirror_url("https://mirror.example.com/file.zip")
 //! .with_validation(validation);
 //!
-//! // Set up progress callback (optional)
-//! let progress_callback = Arc::new(|event: ProgressEvent| {
-//!     match event {
-//!         ProgressEvent::DownloadStarted { url, total_size } => {
-//!             println!("Started downloading: {} ({:?} bytes)", url, total_size);
-//!         }
-//!         ProgressEvent::DownloadProgress { downloaded, total, speed_bps, .. } => {
-//!             if let Some(total) = total {
-//!                 let percent = (downloaded as f64 / total as f64) * 100.0;
-//!                 println!("Progress: {:.1}% ({:.1} KB/s)", percent, speed_bps / 1024.0);
-//!             }
-//!         }
-//!         ProgressEvent::DownloadComplete { final_size, .. } => {
-//!             println!("Download complete: {} bytes", final_size);
-//!         }
-//!         ProgressEvent::ValidationComplete { file, valid } => {
-//!             println!("Validation {}: {}", file, if valid { "PASS" } else { "FAIL" });
-//!         }
-//!         _ => {}
-//!     }
-//! });
+//! // Set up progress reporting (optional)
+//! let progress_reporter = ConsoleProgressReporter::new(true); // verbose output
+//! let progress_callback = Some(progress_reporter.into_callback());
 //!
 //! // Download the file
-//! let result = downloader.download(request, Some(progress_callback)).await?;
+//! let result = downloader.download(request, progress_callback).await?;
 //! println!("Download result: {:?}", result);
 //! # Ok(())
 //! # }
@@ -78,9 +63,28 @@ pub mod downloader;
 
 // Re-export commonly used types for convenience
 pub use downloader::{
-    DownloadConfig, DownloadError, DownloadRequest, DownloadResult,
-    EnhancedDownloader, FileValidation, ProgressCallback, ProgressEvent,
-    Result,
+    // Core types
+    DownloadRequest, DownloadResult, EnhancedDownloader, FileDownloader,
+    DownloaderRegistry, ValidationHandle,
+
+    // Configuration
+    DownloadConfig, DownloadConfigBuilder,
+
+    // Validation
+    FileValidation,
+
+    // Progress tracking
+    ProgressCallback, ProgressEvent, ProgressReporter, IntoProgressCallback,
+    ConsoleProgressReporter, NullProgressReporter, CompositeProgressReporter,
+
+    // Downloaders
+    HttpDownloader,
+
+    // Batch operations and metrics
+    BatchDownloadResult, DownloadMetrics, DownloadMetricsSnapshot,
+
+    // Error handling
+    DownloadError, Result,
 };
 
 pub fn add(left: u64, right: u64) -> u64 {

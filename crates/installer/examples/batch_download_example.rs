@@ -38,6 +38,8 @@ async fn main() -> installer::Result<()> {
         max_concurrent_validations: 2,
         async_validation: true,
         validation_retries: 2,
+        streaming_threshold: 1024 * 1024, // 1MB
+        parallel_validation: true,
     };
 
     // Create the downloader
