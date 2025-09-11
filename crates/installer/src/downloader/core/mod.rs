@@ -14,29 +14,16 @@ pub use progress::{ProgressEvent, ProgressCallback, ProgressReporter, IntoProgre
 
 use std::path::PathBuf;
 
-/// A download source specification
-///
-/// This enum allows DownloadRequest to accept either traditional URLs
-/// or structured download sources for better type safety and performance.
-#[derive(Debug, Clone)]
-pub enum DownloadSource {
-    /// Traditional URL-based download (for backward compatibility)
-    Url {
-        url: String,
-        mirror_url: Option<String>,
-    },
-    /// Structured download source from parse_wabbajack module
-    Structured(crate::parse_wabbajack::sources::DownloadSource),
-}
+// Re-export the structured DownloadSource for convenience
+pub use crate::parse_wabbajack::sources::DownloadSource;
 
 /// A download request containing all necessary information
 ///
 /// This is the main data structure that flows through the entire download system.
-/// It now supports both URL-based downloads (for backward compatibility) and
-/// structured download sources (for better type safety and performance).
+/// It uses structured download sources for type safety and performance.
 #[derive(Debug, Clone)]
 pub struct DownloadRequest {
-    /// The download source (URL or structured)
+    /// The download source
     pub source: DownloadSource,
     /// Directory where the file should be saved
     pub destination: PathBuf,
@@ -49,13 +36,11 @@ pub struct DownloadRequest {
 }
 
 impl DownloadRequest {
-    /// Create a new download request with basic URL and destination
-    pub fn new<S: Into<String>, P: Into<PathBuf>>(url: S, destination: P) -> Self {
+    /// Create a new download request with HTTP URL and destination
+    pub fn new_http<S: Into<String>, P: Into<PathBuf>>(url: S, destination: P) -> Self {
+        use crate::parse_wabbajack::sources::HttpSource;
         Self {
-            source: DownloadSource::Url {
-                url: url.into(),
-                mirror_url: None,
-            },
+            source: DownloadSource::Http(HttpSource::new(url)),
             destination: destination.into(),
             validation: FileValidation::default(),
             filename: None,
@@ -63,13 +48,10 @@ impl DownloadRequest {
         }
     }
 
-    /// Create a new download request with structured source
-    pub fn new_structured<P: Into<PathBuf>>(
-        source: crate::parse_wabbajack::sources::DownloadSource,
-        destination: P,
-    ) -> Self {
+    /// Create a new download request with any structured source
+    pub fn new<P: Into<PathBuf>>(source: DownloadSource, destination: P) -> Self {
         Self {
-            source: DownloadSource::Structured(source),
+            source,
             destination: destination.into(),
             validation: FileValidation::default(),
             filename: None,
@@ -77,10 +59,10 @@ impl DownloadRequest {
         }
     }
 
-    /// Add a mirror URL for fallback support (only works with URL sources)
-    pub fn with_mirror_url<S: Into<String>>(mut self, new_mirror_url: S) -> Self {
-        if let DownloadSource::Url { ref mut mirror_url, .. } = self.source {
-            *mirror_url = Some(new_mirror_url.into());
+    /// Add a mirror URL for HTTP sources
+    pub fn with_mirror_url<S: Into<String>>(mut self, mirror_url: S) -> Self {
+        if let DownloadSource::Http(ref mut http_source) = self.source {
+            http_source.mirror_urls.push(mirror_url.into());
         }
         self
     }
@@ -113,8 +95,8 @@ impl DownloadRequest {
         }
 
         match &self.source {
-            DownloadSource::Url { url, .. } => {
-                let parsed_url = url::Url::parse(url)?;
+            DownloadSource::Http(http_source) => {
+                let parsed_url = url::Url::parse(&http_source.url)?;
                 if let Some(segments) = parsed_url.path_segments() {
                     if let Some(last_segment) = segments.last() {
                         if !last_segment.is_empty() {
@@ -124,41 +106,47 @@ impl DownloadRequest {
                 }
                 Ok("downloaded_file".to_string())
             },
-            DownloadSource::Structured(_structured_source) => {
-                // For structured sources, we don't have a reliable way to extract filename
+            DownloadSource::WabbajackCDN(cdn_source) => {
+                let parsed_url = url::Url::parse(&cdn_source.url)?;
+                if let Some(segments) = parsed_url.path_segments() {
+                    if let Some(last_segment) = segments.last() {
+                        if !last_segment.is_empty() {
+                            return Ok(last_segment.to_string());
+                        }
+                    }
+                }
+                Ok("downloaded_file".to_string())
+            },
+            _ => {
+                // For other sources, we don't have a reliable way to extract filename
                 // so we return a generic name - the caller should set explicit filename
                 Ok("downloaded_file".to_string())
             }
         }
     }
 
-    /// Get the primary URL for this download (if it's a URL-based source)
+    /// Get the primary URL for this download (if it has one)
     pub fn get_primary_url(&self) -> Option<&str> {
         match &self.source {
-            DownloadSource::Url { url, .. } => Some(url),
-            DownloadSource::Structured(_) => None,
-        }
-    }
-
-    /// Get the mirror URL for this download (if it's a URL-based source with mirror)
-    pub fn get_mirror_url(&self) -> Option<&str> {
-        match &self.source {
-            DownloadSource::Url { mirror_url: Some(mirror), .. } => Some(mirror),
+            DownloadSource::Http(http_source) => Some(&http_source.url),
+            DownloadSource::WabbajackCDN(cdn_source) => Some(&cdn_source.url),
             _ => None,
         }
     }
 
-    /// Check if this is a structured download request
-    pub fn is_structured(&self) -> bool {
-        matches!(self.source, DownloadSource::Structured(_))
+    /// Get the mirror URLs for this download (if it has any)
+    pub fn get_mirror_urls(&self) -> Vec<&str> {
+        match &self.source {
+            DownloadSource::Http(http_source) => {
+                http_source.mirror_urls.iter().map(|s| s.as_str()).collect()
+            },
+            _ => Vec::new(),
+        }
     }
 
-    /// Get the structured source if this is a structured request
-    pub fn get_structured_source(&self) -> Option<&crate::parse_wabbajack::sources::DownloadSource> {
-        match &self.source {
-            DownloadSource::Structured(source) => Some(source),
-            _ => None,
-        }
+    /// Get the download source
+    pub fn get_source(&self) -> &DownloadSource {
+        &self.source
     }
 }
 
@@ -184,3 +172,4 @@ pub enum DownloadResult {
         validation_handle: ValidationHandle,
     },
 }
+

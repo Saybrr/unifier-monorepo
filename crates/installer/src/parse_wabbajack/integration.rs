@@ -43,7 +43,7 @@ pub fn operation_to_download_request(
         };
     }
 
-    DownloadRequest::new_structured(operation.source.clone(), parent_dir)
+    DownloadRequest::new(operation.source.clone(), parent_dir)
         .with_filename(operation.filename.clone())
         .with_validation(validation)
         .with_expected_size(operation.expected_size)
@@ -169,7 +169,7 @@ mod tests {
         let request = operation_to_download_request(&operation, &base_destination);
 
         assert_eq!(request.filename, Some("test-file.zip".to_string()));
-        assert!(request.is_structured());
+        // All sources are now structured, so no need for this check
         // Note: expected_size removed since we don't set it from DownloadOperation anymore
         assert_eq!(request.validation.expected_size, None);
     }

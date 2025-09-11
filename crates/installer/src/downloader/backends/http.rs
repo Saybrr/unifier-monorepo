@@ -166,20 +166,15 @@ impl FileDownloader for HttpDownloader {
     ) -> Result<DownloadResult> {
         // Extract URL first for tracing
         let url = match &request.source {
-            crate::downloader::core::DownloadSource::Url { url, .. } => url.as_str(),
-            crate::downloader::core::DownloadSource::Structured(structured) => {
-                match structured {
-                    crate::parse_wabbajack::sources::DownloadSource::Http(http_source) => {
-                        &http_source.url
-                    },
-                    _ => {
-                        return Err(DownloadError::UnsupportedUrl {
-                            url: "non-http structured source".to_string(),
-                            scheme: "structured".to_string(),
-                            supported_schemes: "http, https".to_string(),
-                        });
-                    }
-                }
+            crate::parse_wabbajack::sources::DownloadSource::Http(http_source) => {
+                &http_source.url
+            },
+            _ => {
+                return Err(DownloadError::UnsupportedUrl {
+                    url: "non-http source".to_string(),
+                    scheme: "structured".to_string(),
+                    supported_schemes: "http, https".to_string(),
+                });
             }
         };
 

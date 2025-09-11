@@ -20,19 +20,17 @@ use std::time::Duration;
 use tokio::fs;
 use tracing::{info, warn, debug};
 
-/// Extract URL from a DownloadRequest, handling both URL and structured sources
+/// Extract URL from a DownloadRequest for logging purposes
 fn get_url_from_request(request: &DownloadRequest) -> Result<String> {
     match &request.source {
-        crate::downloader::core::DownloadSource::Url { url, .. } => Ok(url.clone()),
-        crate::downloader::core::DownloadSource::Structured(structured) => {
-            match structured {
-                crate::parse_wabbajack::sources::DownloadSource::Http(http_source) => {
-                    Ok(http_source.url.clone())
-                },
-                _ => {
-                    Ok("structured_source".to_string())
-                }
-            }
+        crate::parse_wabbajack::sources::DownloadSource::Http(http_source) => {
+            Ok(http_source.url.clone())
+        },
+        crate::parse_wabbajack::sources::DownloadSource::WabbajackCDN(cdn_source) => {
+            Ok(cdn_source.url.clone())
+        },
+        _ => {
+            Ok("structured_source".to_string())
         }
     }
 }
@@ -106,15 +104,18 @@ pub async fn download_with_retry(
         }
     }
 
-    // All retries failed, try mirror if available
-    if let Some(mirror_url) = request.get_mirror_url() {
-        warn!("All retries failed for {}, attempting mirror URL: {}", url, mirror_url);
+    // All retries failed, try mirrors if available
+    let mirror_urls = request.get_mirror_urls();
+    for mirror_url in mirror_urls {
+        warn!("All retries failed for {:?}, attempting mirror URL: {}", get_url_from_request(&request).unwrap_or_else(|_| "unknown".to_string()), mirror_url);
 
-        let mirror_request = DownloadRequest::new(mirror_url, &request.destination)
+        use crate::parse_wabbajack::sources::HttpSource;
+        let mirror_source = crate::downloader::core::DownloadSource::Http(HttpSource::new(mirror_url));
+        let mirror_request = DownloadRequest::new(mirror_source, &request.destination)
             .with_validation(request.validation.clone())
             .with_filename(request.filename.clone().unwrap_or_else(|| "file".to_string()));
 
-        match registry.attempt_download(&mirror_request, progress_callback).await {
+        match registry.attempt_download(&mirror_request, progress_callback.clone()).await {
             Ok(result) => {
                 match &result {
                     DownloadResult::Downloaded { size } |
@@ -269,8 +270,9 @@ async fn download_file_with_retry(
         }
     }
 
-    // Try mirror if available
-    if let Some(mirror_url) = request.get_mirror_url() {
+    // Try mirrors if available
+    let mirror_urls = request.get_mirror_urls();
+    for mirror_url in mirror_urls {
         info!("Primary download failed, trying mirror URL");
 
         match registry.find_downloader(mirror_url).await {

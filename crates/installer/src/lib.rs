@@ -29,7 +29,7 @@
 //!     .with_expected_size(1024);
 //!
 //! // Create a download request
-//! let request = DownloadRequest::new(
+//! let request = DownloadRequest::new_http(
 //!     "https://example.com/file.zip",
 //!     "/path/to/download/directory"
 //! )

@@ -278,19 +278,14 @@ impl FileDownloader for WabbajackCDNDownloader {
         progress_callback: Option<ProgressCallback>,
     ) -> Result<DownloadResult> {
         let url = match &request.source {
-            crate::downloader::core::DownloadSource::Url { url, .. } => url.clone(),
-            crate::downloader::core::DownloadSource::Structured(structured_source) => {
-                match structured_source {
-                    crate::parse_wabbajack::sources::DownloadSource::WabbajackCDN(cdn_source) => {
-                        cdn_source.url.clone()
-                    },
-                    _ => return Err(DownloadError::Configuration {
-                        message: "WabbajackCDN downloader only supports WabbajackCDN structured sources".to_string(),
-                        field: None,
-                        suggestion: None,
-                    }),
-                }
-            }
+            crate::parse_wabbajack::sources::DownloadSource::WabbajackCDN(cdn_source) => {
+                cdn_source.url.clone()
+            },
+            _ => return Err(DownloadError::Configuration {
+                message: "WabbajackCDN downloader only supports WabbajackCDN sources".to_string(),
+                field: None,
+                suggestion: None,
+            }),
         };
 
         let dest_path = &request.destination;

@@ -51,7 +51,7 @@ async fn main() -> installer::Result<()> {
         ;
 
     // Create a download request
-    let request = DownloadRequest::new(
+    let request = DownloadRequest::new_http(
         "https://httpbin.org/bytes/1024", // Test endpoint that returns exactly 1024 bytes
         temp_dir.path()
     )

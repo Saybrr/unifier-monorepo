@@ -243,29 +243,29 @@ mod download_request_tests {
 
     #[test]
     fn test_download_request_creation() {
-        let request: DownloadRequest = DownloadRequest::new("https://example.com/file.txt", "/tmp");
+        let request: DownloadRequest = DownloadRequest::new_http("https://example.com/file.txt", "/tmp");
 
         assert_eq!(request.get_primary_url().unwrap(), "https://example.com/file.txt");
         assert_eq!(request.destination, PathBuf::from("/tmp"));
-        assert!(request.get_mirror_url().is_none());
+        assert!(request.get_mirror_urls().is_empty());
         assert!(request.filename.is_none());
     }
 
     #[test]
     fn test_download_request_with_mirror() {
-        let request = DownloadRequest::new("https://example.com/file.txt", "/tmp")
+        let request = DownloadRequest::new_http("https://example.com/file.txt", "/tmp")
             .with_mirror_url("https://mirror.example.com/file.txt");
 
         assert_eq!(
-            request.get_mirror_url(),
-            Some("https://mirror.example.com/file.txt")
+            request.get_mirror_urls(),
+            vec!["https://mirror.example.com/file.txt"]
         );
     }
 
     #[test]
     fn test_download_request_with_validation() {
         let validation = FileValidation::new().with_crc32(0x12345678);
-        let request = DownloadRequest::new("https://example.com/file.txt", "/tmp")
+        let request = DownloadRequest::new_http("https://example.com/file.txt", "/tmp")
             .with_validation(validation.clone());
 
         assert_eq!(request.validation.crc32, validation.crc32);
@@ -273,14 +273,14 @@ mod download_request_tests {
 
     #[test]
     fn test_download_request_get_filename_from_url() {
-        let request = DownloadRequest::new("https://example.com/path/file.txt", "/tmp");
+        let request = DownloadRequest::new_http("https://example.com/path/file.txt", "/tmp");
         let filename = request.get_filename().unwrap();
         assert_eq!(filename, "file.txt");
     }
 
     #[test]
     fn test_download_request_get_filename_explicit() {
-        let request = DownloadRequest::new("https://example.com/path/", "/tmp")
+        let request = DownloadRequest::new_http("https://example.com/path/", "/tmp")
             .with_filename("custom_name.txt");
         let filename = request.get_filename().unwrap();
         assert_eq!(filename, "custom_name.txt");
@@ -288,7 +288,7 @@ mod download_request_tests {
 
     #[test]
     fn test_download_request_get_filename_fallback() {
-        let request = DownloadRequest::new("https://example.com/", "/tmp");
+        let request = DownloadRequest::new_http("https://example.com/", "/tmp");
         let filename = request.get_filename().unwrap();
         assert_eq!(filename, "downloaded_file");
     }
@@ -340,7 +340,7 @@ mod http_downloader_tests {
         let temp_dir = tempdir().unwrap();
         let url = format!("{}/test-file.txt", mock_server.uri());
 
-        let request = DownloadRequest::new(url, temp_dir.path())
+        let request = DownloadRequest::new_http(url, temp_dir.path())
             .with_filename("test-file.txt");
 
         let config = DownloadConfig::default();
@@ -381,7 +381,7 @@ mod http_downloader_tests {
         // Pre-create the file
         tokio::fs::write(&file_path, test_content).await.unwrap();
 
-        let request = DownloadRequest::new("https://example.com/file.txt", temp_dir.path())
+        let request = DownloadRequest::new_http("https://example.com/file.txt", temp_dir.path())
             .with_filename("existing-file.txt");
 
         let config = DownloadConfig::default();
@@ -426,7 +426,7 @@ mod http_downloader_tests {
 
         // Use wrong CRC32 to force validation failure
         let validation = FileValidation::new().with_crc32(0x12345678);
-        let request = DownloadRequest::new(url, temp_dir.path())
+        let request = DownloadRequest::new_http(url, temp_dir.path())
             .with_filename("test-file.txt")
             .with_validation(validation);
 
@@ -465,7 +465,7 @@ mod http_downloader_tests {
         let temp_dir = tempdir().unwrap();
         let url = format!("{}/error-file.txt", mock_server.uri());
 
-        let request = DownloadRequest::new(url, temp_dir.path())
+        let request = DownloadRequest::new_http(url, temp_dir.path())
             .with_filename("error-file.txt");
 
         let config = DownloadConfig::default();
@@ -516,7 +516,7 @@ mod enhanced_downloader_tests {
         let (_mock_server, url) = setup_mock_server_with_content(test_content).await;
 
         let temp_dir = tempdir().unwrap();
-        let request = DownloadRequest::new(url, temp_dir.path())
+        let request = DownloadRequest::new_http(url, temp_dir.path())
             .with_filename("test-file.txt");
 
         let config = DownloadConfig::default();
@@ -566,7 +566,7 @@ mod enhanced_downloader_tests {
         let temp_dir = tempdir().unwrap();
         let primary_url = format!("{}/test-file.txt", primary_server.uri());
 
-        let request = DownloadRequest::new(primary_url, temp_dir.path())
+        let request = DownloadRequest::new_http(primary_url, temp_dir.path())
             .with_mirror_url(mirror_url)
             .with_filename("test-file.txt");
 
@@ -605,8 +605,8 @@ mod enhanced_downloader_tests {
         let temp_dir = tempdir().unwrap();
 
         let requests = vec![
-            DownloadRequest::new(url1, temp_dir.path()).with_filename("file1.txt"),
-            DownloadRequest::new(url2, temp_dir.path()).with_filename("file2.txt"),
+            DownloadRequest::new_http(url1, temp_dir.path()).with_filename("file1.txt"),
+            DownloadRequest::new_http(url2, temp_dir.path()).with_filename("file2.txt"),
         ];
 
         let config = DownloadConfig::default();
@@ -654,7 +654,7 @@ mod enhanced_downloader_tests {
         let temp_dir = tempdir().unwrap();
         let url = format!("{}/test-file.txt", mock_server.uri());
 
-        let request = DownloadRequest::new(url, temp_dir.path())
+        let request = DownloadRequest::new_http(url, temp_dir.path())
             .with_filename("test-file.txt");
 
         let mut config = DownloadConfig::default();
@@ -715,7 +715,7 @@ mod integration_tests {
             .with_md5(expected_md5)
             .with_expected_size(expected_size);
 
-        let request = DownloadRequest::new(url, temp_dir.path())
+        let request = DownloadRequest::new_http(url, temp_dir.path())
             .with_filename("validated-file.txt")
             .with_validation(validation);
 
@@ -1128,7 +1128,7 @@ mod enhanced_integration_tests {
 
         // Create request with validation
         let validation = FileValidation::new().with_crc32(expected_crc32);
-        let request = DownloadRequest::new(url, temp_dir.path())
+        let request = DownloadRequest::new_http(url, temp_dir.path())
             .with_filename("enhanced-test.txt")
             .with_validation(validation);
 

@@ -118,23 +118,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             // Get the URL from the request - for testing, use localhost httpbin for 300MB
             let download_url = match &request.source {
-                DownloadSource::Structured(structured) => {
-                    match structured {
-                        installer::parse_wabbajack::sources::DownloadSource::Http(http_source) => {
-                            Some(http_source.url.clone())
-                        },
-                        installer::parse_wabbajack::sources::DownloadSource::Nexus(nexus_source) => {
-                            // For testing purposes, use localhost httpbin to serve 300MB of data
-                            println!("📦 Nexus source detected: {} by {}", nexus_source.mod_name, nexus_source.author);
-                            println!("   Using localhost httpbin for testing 300MB download...");
-                            println!("   Make sure your httpbin server is running on localhost:80!");
-                            // Start with 10MB test, then you can change to 314572800 for 300MB
-                            Some("http://localhost:80/stream-bytes/10485760".to_string())
-                        },
-                        _ => None
-                    }
+                DownloadSource::Http(http_source) => {
+                    Some(http_source.url.clone())
                 },
-                DownloadSource::Url { url, .. } => Some(url.clone()),
+                DownloadSource::Nexus(nexus_source) => {
+                    // For testing purposes, use localhost httpbin to serve 300MB of data
+                    println!("📦 Nexus source detected: {} by {}", nexus_source.mod_name, nexus_source.author);
+                    println!("   Using localhost httpbin for testing 300MB download...");
+                    println!("   Make sure your httpbin server is running on localhost:80!");
+                    // Start with 10MB test, then you can change to 314572800 for 300MB
+                    Some("http://localhost:80/stream-bytes/10485760".to_string())
+                },
+                _ => None
             };
 
             if let Some(url) = download_url {

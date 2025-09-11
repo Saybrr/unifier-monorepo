@@ -53,7 +53,7 @@ async fn main() -> installer::Result<()> {
     // Create multiple download requests with different file sizes
     let requests = vec![
         // Small file (1KB)
-        DownloadRequest::new(
+        DownloadRequest::new_http(
             "http://localhost:80/bytes/1024",
             temp_dir.path()
         )
@@ -64,7 +64,7 @@ async fn main() -> installer::Result<()> {
         ),
 
         // Medium file (10KB)
-        DownloadRequest::new(
+        DownloadRequest::new_http(
             "http://localhost:80/bytes/10240",
             temp_dir.path()
         )
@@ -75,7 +75,7 @@ async fn main() -> installer::Result<()> {
         ),
 
         // Large file (100KB)
-        DownloadRequest::new(
+        DownloadRequest::new_http(
             "http://localhost:80/bytes/102400",
             temp_dir.path()
         )
@@ -86,7 +86,7 @@ async fn main() -> installer::Result<()> {
         ),
 
         // Another small file with mirror URL demonstration
-        DownloadRequest::new(
+        DownloadRequest::new_http(
             "http://localhost:80/status/500", // This will fail
             temp_dir.path()
         )
@@ -98,7 +98,7 @@ async fn main() -> installer::Result<()> {
         ),
 
         // File with intentional validation failure to demonstrate retry
-        DownloadRequest::new(
+        DownloadRequest::new_http(
             "http://localhost:80/bytes/5120",
             temp_dir.path()
         )
@@ -109,7 +109,7 @@ async fn main() -> installer::Result<()> {
         ),
 
         // File from a different test endpoint
-        DownloadRequest::new(
+        DownloadRequest::new_http(
             "http://localhost:80/bytes/4096",
             temp_dir.path()
         )

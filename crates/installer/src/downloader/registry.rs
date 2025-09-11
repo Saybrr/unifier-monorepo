@@ -123,29 +123,21 @@ impl DownloaderRegistry {
 
     /// Find the appropriate downloader for a download request
     ///
-    /// This method handles both URL-based and structured download sources.
+    /// Find the appropriate downloader for a download request based on source type
     pub async fn find_downloader_for_request(&self, request: &DownloadRequest) -> Result<&dyn FileDownloader> {
         match &request.source {
-            crate::downloader::core::DownloadSource::Url { url, .. } => {
-                self.find_downloader(url).await
+            crate::downloader::core::DownloadSource::Http(http_source) => {
+                self.find_downloader(&http_source.url).await
             },
-            crate::downloader::core::DownloadSource::Structured(structured_source) => {
-                // For structured sources, we need to find a downloader based on the source type
-                match structured_source {
-                    crate::parse_wabbajack::sources::DownloadSource::Http(http_source) => {
-                        self.find_downloader(&http_source.url).await
-                    },
-                    crate::parse_wabbajack::sources::DownloadSource::WabbajackCDN(cdn_source) => {
-                        self.find_downloader(&cdn_source.url).await
-                    },
-                    _ => {
-                        Err(DownloadError::UnsupportedUrl {
-                            url: "structured_source".to_string(),
-                            scheme: "structured".to_string(),
-                            supported_schemes: "http, https, wabbajack-cdn".to_string(),
-                        })
-                    }
-                }
+            crate::downloader::core::DownloadSource::WabbajackCDN(cdn_source) => {
+                self.find_downloader(&cdn_source.url).await
+            },
+            _ => {
+                Err(DownloadError::UnsupportedUrl {
+                    url: "structured_source".to_string(),
+                    scheme: "structured".to_string(),
+                    supported_schemes: "http, https, wabbajack-cdn".to_string(),
+                })
             }
         }
     }
