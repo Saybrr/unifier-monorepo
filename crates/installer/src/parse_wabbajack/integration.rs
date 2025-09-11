@@ -46,6 +46,7 @@ pub fn operation_to_download_request(
     DownloadRequest::new_structured(operation.source.clone(), parent_dir)
         .with_filename(operation.filename.clone())
         .with_validation(validation)
+        .with_expected_size(operation.expected_size)
 }
 
 /// Convert multiple DownloadOperations to DownloadRequests
@@ -160,6 +161,7 @@ mod tests {
             source,
             "test-file.zip",
             "abcd1234",
+            1024, // Test file size
         )
         .with_hash_algorithm("SHA256");
 
@@ -179,6 +181,7 @@ mod tests {
             DownloadSource::Http(http_source),
             "auto.zip",
             "hash1",
+            2048, // Test file size
         );
 
         let manual_op = DownloadOperation::new(
@@ -188,6 +191,7 @@ mod tests {
             }),
             "manual.zip",
             "hash2",
+            4096, // Test file size
         );
 
         let operations = vec![auto_op, manual_op];

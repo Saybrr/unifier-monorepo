@@ -171,6 +171,7 @@ impl ModlistParser {
             source,
             archive.name.clone(),
             archive.hash.clone(),
+            archive.size,
         )
         .with_hash_algorithm(&self.default_hash_algorithm)
         .with_priority(index as u32) // Use index as default priority

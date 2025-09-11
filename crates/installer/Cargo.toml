@@ -55,6 +55,7 @@ once_cell = "1.19"
 hex = "0.4"
 
 [dev-dependencies]
+tokio = { version = "1.0", features = ["full"] }
 tokio-test = "0.4"
 wiremock = "0.6"
 tracing-subscriber = "0.3"
@@ -70,4 +71,8 @@ path = "../../examples/parse_baseline_example.rs"
 [[example]]
 name = "wabbajack_cdn_example"
 path = "../../examples/wabbajack_cdn_example.rs"
+
+[[example]]
+name = "size_progress_example"
+path = "../../examples/size_progress_example.rs"
 

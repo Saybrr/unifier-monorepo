@@ -159,11 +159,13 @@ async fn demo_advanced_batch_processing() -> Result<(), Box<dyn std::error::Erro
             WabbajackDownloadSource::Http(HttpSource::new("http://localhost:80/json")),
             "test-data.json",
             "dummy_hash_1",
+            1024, // Test file size
         ),
         DownloadOperation::new(
             WabbajackDownloadSource::Http(HttpSource::new("http://localhost:80/uuid")),
             "test-uuid.json",
             "dummy_hash_2",
+            2048, // Test file size
         ),
     ];
 

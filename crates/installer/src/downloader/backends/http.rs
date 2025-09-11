@@ -193,7 +193,7 @@ impl FileDownloader for HttpDownloader {
             if let Some(result) = self.check_existing_file(&dest_path, &request.validation, progress_callback.clone()).await? {
                 return Ok(result);
             }
-            let size = self.download_helper(url, &dest_path, progress_callback.clone(), None).await?;
+            let size = self.download_helper(url, &dest_path, progress_callback.clone(), request.expected_size).await?;
 
             // Validate the downloaded file (only if validation is specified)
             if !request.validation.is_empty() {

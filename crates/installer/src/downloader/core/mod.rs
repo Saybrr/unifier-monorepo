@@ -44,6 +44,8 @@ pub struct DownloadRequest {
     pub validation: FileValidation,
     /// Optional override for the filename (defaults to extracting from source)
     pub filename: Option<String>,
+    /// Expected file size in bytes (for progress reporting)
+    pub expected_size: Option<u64>,
 }
 
 impl DownloadRequest {
@@ -57,6 +59,7 @@ impl DownloadRequest {
             destination: destination.into(),
             validation: FileValidation::default(),
             filename: None,
+            expected_size: None,
         }
     }
 
@@ -70,6 +73,7 @@ impl DownloadRequest {
             destination: destination.into(),
             validation: FileValidation::default(),
             filename: None,
+            expected_size: None,
         }
     }
 
@@ -90,6 +94,12 @@ impl DownloadRequest {
     /// Override the filename (otherwise extracted from source)
     pub fn with_filename<S: Into<String>>(mut self, filename: S) -> Self {
         self.filename = Some(filename.into());
+        self
+    }
+
+    /// Set the expected file size for progress reporting
+    pub fn with_expected_size(mut self, size: u64) -> Self {
+        self.expected_size = Some(size);
         self
     }
 

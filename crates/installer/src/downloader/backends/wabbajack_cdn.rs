@@ -202,10 +202,14 @@ impl WabbajackCDNDownloader {
         &self,
         url: &str,
         dest_path: &Path,
-        progress_callback: Option<ProgressCallback>
+        progress_callback: Option<ProgressCallback>,
+        expected_size: Option<u64>
     ) -> Result<u64> {
         // Get file definition
         let definition = self.get_file_definition(url).await?;
+
+        // Use expected size if provided, otherwise use definition size
+        let total_size = expected_size.unwrap_or(definition.size);
 
         // Create output file
         let mut output_file = File::create(dest_path).await
@@ -216,7 +220,6 @@ impl WabbajackCDNDownloader {
             })?;
 
         // Download parts in sequence (could be parallelized in the future)
-        let total_size = definition.size;
         let mut downloaded_bytes = 0u64;
 
         for part in &definition.parts {
@@ -308,7 +311,7 @@ impl FileDownloader for WabbajackCDNDownloader {
         }
 
         // Download the chunked file
-        let final_size = self.download_chunked_file(&url, dest_path, progress_callback).await?;
+        let final_size = self.download_chunked_file(&url, dest_path, progress_callback, request.expected_size).await?;
 
         Ok(DownloadResult::Downloaded {
             size: final_size
@@ -320,9 +323,9 @@ impl FileDownloader for WabbajackCDNDownloader {
         url: &str,
         dest_path: &Path,
         progress_callback: Option<ProgressCallback>,
-        _expected_size: Option<u64>,
+        expected_size: Option<u64>,
     ) -> Result<u64> {
-        self.download_chunked_file(url, dest_path, progress_callback).await
+        self.download_chunked_file(url, dest_path, progress_callback, expected_size).await
     }
 
     async fn check_existing_file(

@@ -19,6 +19,8 @@ pub struct DownloadOperation {
     pub expected_hash: String,
     /// Hash algorithm used (e.g., "SHA256", "MD5")
     pub hash_algorithm: String,
+    /// Expected file size in bytes
+    pub expected_size: u64,
     /// Priority for download ordering (lower = higher priority)
     pub priority: u32,
     /// Optional metadata for display/logging purposes
@@ -93,12 +95,14 @@ impl DownloadOperation {
         source: DownloadSource,
         filename: S,
         expected_hash: S,
+        expected_size: u64,
     ) -> Self {
         Self {
             source,
             filename: filename.into(),
             expected_hash: expected_hash.into(),
             hash_algorithm: "SHA256".to_string(), // Default to SHA256
+            expected_size,
             priority: 0,
             metadata: OperationMetadata::default(),
         }
