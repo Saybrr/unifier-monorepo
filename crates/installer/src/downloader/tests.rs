@@ -243,11 +243,11 @@ mod download_request_tests {
 
     #[test]
     fn test_download_request_creation() {
-        let request = DownloadRequest::new("https://example.com/file.txt", "/tmp");
+        let request: DownloadRequest = DownloadRequest::new("https://example.com/file.txt", "/tmp");
 
-        assert_eq!(request.url, "https://example.com/file.txt");
+        assert_eq!(request.get_primary_url().unwrap(), "https://example.com/file.txt");
         assert_eq!(request.destination, PathBuf::from("/tmp"));
-        assert!(request.mirror_url.is_none());
+        assert!(request.get_mirror_url().is_none());
         assert!(request.filename.is_none());
     }
 
@@ -257,8 +257,8 @@ mod download_request_tests {
             .with_mirror_url("https://mirror.example.com/file.txt");
 
         assert_eq!(
-            request.mirror_url,
-            Some("https://mirror.example.com/file.txt".to_string())
+            request.get_mirror_url(),
+            Some("https://mirror.example.com/file.txt")
         );
     }
 

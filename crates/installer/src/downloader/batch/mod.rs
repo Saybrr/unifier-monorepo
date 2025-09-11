@@ -138,14 +138,12 @@ pub async fn download_with_retry(
 
     // All attempts failed
     metrics.record_download_failed();
-    let final_error = last_error.unwrap_or_else(|| {
-        DownloadError::MaxRetriesExceeded {
-            url: url.clone(),
-            max_retries,
-            total_duration_secs: 0,
-            last_error: "All attempts failed".to_string(),
-        }
-    });
+    let final_error = DownloadError::MaxRetriesExceeded {
+        url: url.clone(),
+        max_retries,
+        total_duration_secs: 0,
+        last_error: last_error.map(|e| e.to_string()).unwrap_or_else(|| "All attempts failed".to_string()),
+    };
 
     if let Some(ref callback) = progress_callback_clone {
         callback(ProgressEvent::Error {
