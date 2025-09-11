@@ -87,3 +87,7 @@ path = "../../examples/size_progress_example.rs"
 name = "gamefile_example"
 path = "../../examples/gamefile_example.rs"
 
+[[example]]
+name = "simple_baseline_download"
+path = "../../examples/simple_baseline_download.rs"
+
