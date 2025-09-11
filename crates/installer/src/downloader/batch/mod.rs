@@ -20,6 +20,23 @@ use std::time::Duration;
 use tokio::fs;
 use tracing::{info, warn, debug};
 
+/// Extract URL from a DownloadRequest, handling both URL and structured sources
+fn get_url_from_request(request: &DownloadRequest) -> Result<String> {
+    match &request.source {
+        crate::downloader::core::DownloadSource::Url { url, .. } => Ok(url.clone()),
+        crate::downloader::core::DownloadSource::Structured(structured) => {
+            match structured {
+                crate::parse_wabbajack::sources::DownloadSource::Http(http_source) => {
+                    Ok(http_source.url.clone())
+                },
+                _ => {
+                    Ok("structured_source".to_string())
+                }
+            }
+        }
+    }
+}
+
 /// Intermediate result type for batch operations
 #[derive(Debug)]
 pub enum BatchDownloadResult {
@@ -41,7 +58,7 @@ pub async fn download_with_retry(
 ) -> Result<DownloadResult> {
     metrics.record_download_started();
 
-    let url = request.url.clone();
+    let url = request.get_primary_url().unwrap_or("unknown").to_string();
     let max_retries = config.max_retries;
     let progress_callback_clone = progress_callback.clone();
 
@@ -90,16 +107,12 @@ pub async fn download_with_retry(
     }
 
     // All retries failed, try mirror if available
-    if let Some(ref mirror_url) = request.mirror_url {
-        warn!("All retries failed for {}, attempting mirror URL: {}", request.url, mirror_url);
+    if let Some(mirror_url) = request.get_mirror_url() {
+        warn!("All retries failed for {}, attempting mirror URL: {}", url, mirror_url);
 
-        let mirror_request = DownloadRequest {
-            url: mirror_url.clone(),
-            mirror_url: None, // Prevent infinite recursion
-            destination: request.destination,
-            validation: request.validation,
-            filename: request.filename,
-        };
+        let mirror_request = DownloadRequest::new(mirror_url, &request.destination)
+            .with_validation(request.validation.clone())
+            .with_filename(request.filename.clone().unwrap_or_else(|| "file".to_string()));
 
         match registry.attempt_download(&mirror_request, progress_callback).await {
             Ok(result) => {
@@ -127,7 +140,7 @@ pub async fn download_with_retry(
     metrics.record_download_failed();
     let final_error = last_error.unwrap_or_else(|| {
         DownloadError::MaxRetriesExceeded {
-            url: request.url,
+            url: url.clone(),
             max_retries,
             total_duration_secs: 0,
             last_error: "All attempts failed".to_string(),
@@ -157,7 +170,7 @@ pub async fn download_with_async_validation(
     let dest_path = request.destination.join(&filename);
 
     // Check if file already exists and is valid
-    let downloader = registry.find_downloader(&request.url).await?;
+    let downloader = registry.find_downloader_for_request(&request).await?;
     if let Some(existing_result) = downloader.check_existing_file(
         &dest_path,
         &request.validation,
@@ -179,7 +192,7 @@ pub async fn download_with_async_validation(
         let validation_handle = validation_pool.validate_async(
             request.validation.clone(),
             dest_path,
-            request.url.clone(),
+            get_url_from_request(&request)?,
             request.clone(),
             progress_callback,
         );
@@ -215,7 +228,7 @@ async fn download_file_with_retry(
     request: &DownloadRequest,
     progress_callback: Option<ProgressCallback>,
 ) -> Result<u64> {
-    let url = request.url.clone();
+    let url = get_url_from_request(request)?;
     let max_retries = config.max_retries;
     let filename = request.get_filename()?;
     let dest_path = request.destination.join(&filename);
@@ -246,7 +259,7 @@ async fn download_file_with_retry(
             }
         };
 
-        match downloader.download_helper(&url, &dest_path, progress_callback.clone()).await {
+        match downloader.download_helper(&url, &dest_path, progress_callback.clone(), None).await {
             Ok(size) => {
                 metrics.record_download_completed(size);
                 return Ok(size);
@@ -259,12 +272,12 @@ async fn download_file_with_retry(
     }
 
     // Try mirror if available
-    if let Some(ref mirror_url) = request.mirror_url {
+    if let Some(mirror_url) = request.get_mirror_url() {
         info!("Primary download failed, trying mirror URL");
 
         match registry.find_downloader(mirror_url).await {
             Ok(mirror_downloader) => {
-                match mirror_downloader.download_helper(mirror_url, &dest_path, progress_callback.clone()).await {
+                match mirror_downloader.download_helper(mirror_url, &dest_path, progress_callback.clone(), None).await {
                     Ok(size) => {
                         metrics.record_download_completed(size);
                         return Ok(size);
@@ -281,14 +294,14 @@ async fn download_file_with_retry(
     if let Some(ref callback) = progress_callback {
         if let Some(ref error) = last_error {
             callback(ProgressEvent::Error {
-                url,
+                url: url.clone(),
                 error: error.to_string(),
             });
         }
     }
 
     Err(DownloadError::MaxRetriesExceeded {
-        url: request.url.clone(),
+        url: url,
         max_retries,
         total_duration_secs: 0,
         last_error: last_error.map_or("No error recorded".to_string(), |e| e.to_string()),

@@ -43,6 +43,7 @@ impl HttpDownloader {
         url: &str,
         dest_path: &Path,
         progress_callback: Option<ProgressCallback>,
+        expected_size: Option<u64>,
     ) -> Result<u64> {
         // Check for existing partial file
         let temp_path = dest_path.with_extension("part");
@@ -55,7 +56,14 @@ impl HttpDownloader {
         };
 
         // Get file size for progress tracking
-        let mut total_size = self.get_file_size(url).await?;
+        // Use expected size if provided, otherwise try to get from server
+        let mut total_size = if let Some(expected) = expected_size {
+            debug!("Using expected size from validation: {} bytes", expected);
+            Some(expected)
+        } else {
+            debug!("No expected size provided, querying server");
+            self.get_file_size(url).await?
+        };
 
         // Build request with range header for resume
         let mut request = self.client.get(url);
@@ -156,19 +164,36 @@ impl FileDownloader for HttpDownloader {
         request: &DownloadRequest,
         progress_callback: Option<ProgressCallback>,
     ) -> Result<DownloadResult> {
+        // Extract URL first for tracing
+        let url = match &request.source {
+            crate::downloader::core::DownloadSource::Url { url, .. } => url.as_str(),
+            crate::downloader::core::DownloadSource::Structured(structured) => {
+                match structured {
+                    crate::parse_wabbajack::sources::DownloadSource::Http(http_source) => {
+                        &http_source.url
+                    },
+                    _ => {
+                        return Err(DownloadError::UnsupportedUrl {
+                            url: "non-http structured source".to_string(),
+                            scheme: "structured".to_string(),
+                            supported_schemes: "http, https".to_string(),
+                        });
+                    }
+                }
+            }
+        };
+
         async move {
             let filename = request.get_filename()?;
             let dest_path = request.destination.join(&filename);
 
-            debug!("Downloading {} to {}", request.url, dest_path.display());
+            debug!("Downloading {} to {}", url, dest_path.display());
 
             // Check existing file first
             if let Some(result) = self.check_existing_file(&dest_path, &request.validation, progress_callback.clone()).await? {
                 return Ok(result);
             }
-
-            // Download the file
-            let size = self.download_helper(&request.url, &dest_path, progress_callback.clone()).await?;
+            let size = self.download_helper(url, &dest_path, progress_callback.clone(), None).await?;
 
             // Validate the downloaded file (only if validation is specified)
             if !request.validation.is_empty() {
@@ -188,7 +213,7 @@ impl FileDownloader for HttpDownloader {
 
             Ok(DownloadResult::Downloaded { size })
         }
-        .instrument(info_span!("http_download", url = %request.url))
+        .instrument(info_span!("http_download", url = %url))
         .await
     }
 
@@ -198,6 +223,7 @@ impl FileDownloader for HttpDownloader {
         url: &str,
         dest_path: &std::path::Path,
         progress_callback: Option<ProgressCallback>,
+        expected_size: Option<u64>,
     ) -> Result<u64> {
         debug!("Download: {} to {}", url, dest_path.display());
 
@@ -207,7 +233,7 @@ impl FileDownloader for HttpDownloader {
             debug!("Created directory: {}", parent.display());
         }
 
-        let size = self.download_file(url, dest_path, progress_callback).await?;
+        let size = self.download_file(url, dest_path, progress_callback, expected_size).await?;
         debug!("Pure download completed: {} bytes", size);
         Ok(size)
     }

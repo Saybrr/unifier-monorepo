@@ -60,6 +60,7 @@
 //! - **Async/await**: Full async support with Tokio runtime
 
 pub mod downloader;
+pub mod parse_wabbajack;
 
 // Re-export commonly used types for convenience
 pub use downloader::{
@@ -85,6 +86,22 @@ pub use downloader::{
 
     // Error handling
     DownloadError, Result, ErrorSeverity, FileOperation, ValidationType, ErrorContext,
+};
+
+// Re-export parse_wabbajack types
+pub use parse_wabbajack::{
+    // Core parsing types
+    DownloadOperation, ArchiveManifest, OperationMetadata, ManifestMetadata,
+    parse_modlist, ModlistParser,
+
+    // Source types
+    DownloadSource as WabbajackDownloadSource, HttpSource, NexusSource,
+    GameFileSource, ManualSource, ArchiveSource,
+
+    // Integration functions
+    operation_to_download_request, operations_to_download_requests,
+    manifest_to_download_requests, manifest_to_prioritized_download_requests,
+    manifest_to_download_requests_with_stats, ConversionStats,
 };
 
 pub fn add(left: u64, right: u64) -> u64 {

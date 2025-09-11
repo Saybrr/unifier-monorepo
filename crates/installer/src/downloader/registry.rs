@@ -37,6 +37,7 @@ pub trait FileDownloader: Send + Sync {
         url: &str,
         dest_path: &std::path::Path,
         progress_callback: Option<ProgressCallback>,
+        expected_size: Option<u64>,
     ) -> Result<u64>;
 
     /// Check if file exists and handle validation if needed
@@ -113,6 +114,34 @@ impl DownloaderRegistry {
             })
     }
 
+    /// Find the appropriate downloader for a download request
+    ///
+    /// This method handles both URL-based and structured download sources.
+    pub async fn find_downloader_for_request(&self, request: &DownloadRequest) -> Result<&dyn FileDownloader> {
+        match &request.source {
+            crate::downloader::core::DownloadSource::Url { url, .. } => {
+                self.find_downloader(url).await
+            },
+            crate::downloader::core::DownloadSource::Structured(structured_source) => {
+                // For structured sources, we need to find a downloader based on the source type
+                // For now, we'll delegate to the HTTP downloader for HTTP sources
+                // and return an error for others until we implement those downloaders
+                match structured_source {
+                    crate::parse_wabbajack::sources::DownloadSource::Http(http_source) => {
+                        self.find_downloader(&http_source.url).await
+                    },
+                    _ => {
+                        Err(DownloadError::UnsupportedUrl {
+                            url: "structured_source".to_string(),
+                            scheme: "structured".to_string(),
+                            supported_schemes: "http, https".to_string(),
+                        })
+                    }
+                }
+            }
+        }
+    }
+
     /// Attempt to download a file using the appropriate downloader
     ///
     /// This method combines finding the right downloader and performing
@@ -123,7 +152,7 @@ impl DownloaderRegistry {
         request: &DownloadRequest,
         progress_callback: Option<ProgressCallback>,
     ) -> Result<DownloadResult> {
-        let downloader = self.find_downloader(&request.url).await?;
+        let downloader = self.find_downloader_for_request(request).await?;
         downloader.download(request, progress_callback).await
     }
 }
