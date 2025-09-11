@@ -7,7 +7,7 @@
 use crate::downloader::{
     core::{DownloadRequest, DownloadResult, ProgressCallback, DownloadError, Result, FileValidation},
     config::DownloadConfig,
-    backends::HttpDownloader,
+    backends::{HttpDownloader, WabbajackCDNDownloader},
 };
 use async_trait::async_trait;
 
@@ -93,6 +93,13 @@ impl DownloaderRegistry {
         self.register(HttpDownloader::new(config))
     }
 
+    /// Add a WabbajackCDN downloader
+    ///
+    /// This is a convenience method for adding WabbajackCDN support to the registry.
+    pub fn with_wabbajack_cdn_downloader(self) -> Self {
+        self.register(WabbajackCDNDownloader::new())
+    }
+
     /// Find the appropriate downloader for a given URL
     ///
     /// This method iterates through registered downloaders and returns
@@ -109,7 +116,7 @@ impl DownloaderRegistry {
                 DownloadError::UnsupportedUrl {
                     url: url.to_string(),
                     scheme,
-                    supported_schemes: "http, https".to_string(),
+                    supported_schemes: "http, https, wabbajack-cdn".to_string(),
                 }
             })
     }
@@ -124,17 +131,18 @@ impl DownloaderRegistry {
             },
             crate::downloader::core::DownloadSource::Structured(structured_source) => {
                 // For structured sources, we need to find a downloader based on the source type
-                // For now, we'll delegate to the HTTP downloader for HTTP sources
-                // and return an error for others until we implement those downloaders
                 match structured_source {
                     crate::parse_wabbajack::sources::DownloadSource::Http(http_source) => {
                         self.find_downloader(&http_source.url).await
+                    },
+                    crate::parse_wabbajack::sources::DownloadSource::WabbajackCDN(cdn_source) => {
+                        self.find_downloader(&cdn_source.url).await
                     },
                     _ => {
                         Err(DownloadError::UnsupportedUrl {
                             url: "structured_source".to_string(),
                             scheme: "structured".to_string(),
-                            supported_schemes: "http, https".to_string(),
+                            supported_schemes: "http, https, wabbajack-cdn".to_string(),
                         })
                     }
                 }

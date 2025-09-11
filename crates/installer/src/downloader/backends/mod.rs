@@ -5,6 +5,7 @@
 //!
 //! Currently supported:
 //! - HTTP/HTTPS downloads with resume support
+//! - WabbajackCDN chunked downloads
 //!
 //! Future backends might include:
 //! - FTP downloads
@@ -12,6 +13,8 @@
 //! - Cloud storage downloads (S3, Azure, etc.)
 
 pub mod http;
+pub mod wabbajack_cdn;
 
 // Re-export main implementations
 pub use http::HttpDownloader;
+pub use wabbajack_cdn::WabbajackCDNDownloader;

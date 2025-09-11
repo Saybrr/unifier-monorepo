@@ -7,7 +7,6 @@
 //! rather than converting to URL strings, as this provides better type safety,
 //! performance, and allows for richer data representation.
 
-pub mod nexus;
 pub mod sources;
 pub mod operations;
 pub mod parser;

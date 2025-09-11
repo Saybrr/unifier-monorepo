@@ -56,7 +56,7 @@ pub use r#lib::EnhancedDownloader;
 pub use registry::{FileDownloader, DownloaderRegistry};
 
 // Backend implementations
-pub use backends::HttpDownloader;
+pub use backends::{HttpDownloader, WabbajackCDNDownloader};
 
 // Batch operations and metrics
 pub use batch::{DownloadMetrics, DownloadMetricsSnapshot, BatchDownloadResult};

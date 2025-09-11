@@ -23,6 +23,8 @@ pub enum DownloadSource {
     Manual(ManualSource),
     /// Archive extraction from another archive
     Archive(ArchiveSource),
+    /// Download from Wabbajack CDN
+    WabbajackCDN(WabbajackCDNSource),
 }
 
 /// HTTP download source
@@ -84,6 +86,13 @@ pub struct ArchiveSource {
     pub archive_hash: String,
     /// Path within the archive to extract
     pub inner_path: String,
+}
+
+/// Wabbajack CDN download source
+#[derive(Debug, Clone, PartialEq)]
+pub struct WabbajackCDNSource {
+    /// CDN URL for the file
+    pub url: String,
 }
 
 impl HttpSource {
@@ -151,6 +160,14 @@ impl GameFileSource {
     }
 }
 
+impl WabbajackCDNSource {
+    pub fn new<S: Into<String>>(url: S) -> Self {
+        Self {
+            url: url.into(),
+        }
+    }
+}
+
 impl DownloadSource {
     /// Get a human-readable description of this download source
     pub fn description(&self) -> String {
@@ -166,6 +183,9 @@ impl DownloadSource {
             DownloadSource::Manual(manual) => format!("Manual download: {}", manual.instructions),
             DownloadSource::Archive(archive) => {
                 format!("Extract {} from archive {}", archive.inner_path, archive.archive_hash)
+            },
+            DownloadSource::WabbajackCDN(wabbajack_cdn) => {
+                format!("WabbajackCDN download from {}", wabbajack_cdn.url)
             },
         }
     }

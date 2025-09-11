@@ -4,7 +4,7 @@
 //! it into structured DownloadOperation objects.
 
 use crate::parse_wabbajack::{
-    sources::{DownloadSource, HttpSource, NexusSource, GameFileSource},
+    sources::{DownloadSource, HttpSource, NexusSource, GameFileSource, WabbajackCDNSource},
     operations::{DownloadOperation, ArchiveManifest, ManifestMetadata, OperationMetadata},
 };
 use serde::Deserialize;
@@ -68,15 +68,15 @@ pub enum RawDownloaderState {
         #[serde(rename = "Name")]
         name: String,
         #[serde(rename = "Author")]
-        author: String,
+        author: Option<String>,
         #[serde(rename = "Version")]
         version: String,
         #[serde(rename = "Description")]
         description: String,
         #[serde(rename = "IsNSFW")]
         is_nsfw: bool,
-        #[serde(rename = "ImageURL", default)]
-        image_url: String,
+        #[serde(rename = "ImageURL")]
+        image_url: Option<String>,
     },
 
     #[serde(rename = "GameFileSourceDownloader, Wabbajack.Lib")]
@@ -89,6 +89,12 @@ pub enum RawDownloaderState {
         game_version: String,
         #[serde(rename = "Hash")]
         hash: String,
+    },
+
+    #[serde(rename = "WabbajackCDNDownloader+State, Wabbajack.Lib")]
+    WabbajackCDN {
+        #[serde(rename = "Url")]
+        url: String,
     },
 
     // Handle unknown downloader types gracefully
@@ -195,8 +201,15 @@ impl ModlistParser {
             RawDownloaderState::Nexus {
                 mod_id, file_id, game_name, name, author, version, description, is_nsfw, ..
             } => {
+                let author_str = author.as_deref().unwrap_or("Unknown");
                 let nexus_source = NexusSource::new(*mod_id, *file_id, game_name.clone())
-                    .with_metadata(name, author, version, description, *is_nsfw);
+                    .with_metadata(
+                        name.as_str(),
+                        author_str,
+                        version.as_str(),
+                        description.as_str(),
+                        *is_nsfw
+                    );
 
                 Ok(DownloadSource::Nexus(nexus_source))
             },
@@ -204,6 +217,11 @@ impl ModlistParser {
             RawDownloaderState::GameFile { game, game_file, game_version, .. } => {
                 let gamefile_source = GameFileSource::new(game, game_file, game_version);
                 Ok(DownloadSource::GameFile(gamefile_source))
+            },
+
+            RawDownloaderState::WabbajackCDN { url } => {
+                let wabbajack_cdn_source = WabbajackCDNSource::new(url);
+                Ok(DownloadSource::WabbajackCDN(wabbajack_cdn_source))
             },
 
             RawDownloaderState::Unknown => {

@@ -122,6 +122,7 @@ pub fn manifest_to_download_requests_with_stats(
             crate::parse_wabbajack::sources::DownloadSource::GameFile(_) => "GameFile",
             crate::parse_wabbajack::sources::DownloadSource::Manual(_) => "Manual",
             crate::parse_wabbajack::sources::DownloadSource::Archive(_) => "Archive",
+            crate::parse_wabbajack::sources::DownloadSource::WabbajackCDN(_) => "WabbajackCDN",
         };
 
         *stats.operations_by_source.entry(source_type.to_string()).or_insert(0) += 1;

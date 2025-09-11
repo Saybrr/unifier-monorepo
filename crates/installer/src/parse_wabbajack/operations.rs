@@ -78,6 +78,7 @@ pub struct ManifestStats {
     pub gamefile_operations: usize,
     pub manual_operations: usize,
     pub archive_operations: usize,
+    pub wabbajack_cdn_operations: usize,
     /// Total expected download size in bytes
     pub total_download_size: u64,
     /// Operations requiring user interaction
@@ -170,6 +171,7 @@ impl ArchiveManifest {
                 DownloadSource::GameFile(_) => stats.gamefile_operations += 1,
                 DownloadSource::Manual(_) => stats.manual_operations += 1,
                 DownloadSource::Archive(_) => stats.archive_operations += 1,
+                DownloadSource::WabbajackCDN(_) => stats.wabbajack_cdn_operations += 1,
             }
 
             if operation.requires_user_interaction() {
