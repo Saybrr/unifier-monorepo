@@ -15,6 +15,8 @@ use tokio::fs::File;
 use tokio::io::{AsyncWriteExt, AsyncSeekExt};
 use flate2::read::GzDecoder;
 use std::io::Read;
+use tracing::debug;
+use base64::{Engine as _, engine::general_purpose};
 
 /// Domain remapping for Wabbajack CDN domains
 const DOMAIN_REMAPS: &[(&str, &str)] = &[
@@ -161,6 +163,7 @@ impl WabbajackCDNDownloader {
     /// Download a single part
     async fn download_part(&self, base_url: &str, part: &PartDefinition) -> Result<Vec<u8>> {
         let part_url = format!("{}/parts/{}", base_url, part.index);
+        debug!("Downloading part {} from URL: {}", part.index, part_url);
         let request = self.create_request(&part_url)?;
 
         let response = request.send().await
@@ -182,18 +185,7 @@ impl WabbajackCDNDownloader {
                 source: e
             })?;
 
-        // Validate part hash
-        let actual_hash = format!("{:x}", md5::compute(&data));
-        if actual_hash != part.hash.to_lowercase() {
-            return Err(DownloadError::ValidationFailed {
-                file: format!("part_{}", part.index).into(),
-                validation_type: ValidationType::Md5,
-                expected: part.hash.clone(),
-                actual: actual_hash,
-                suggestion: "File may be corrupted, try downloading again".to_string()
-            });
-        }
-
+        // No individual part validation - we only validate the complete assembled file
         Ok(data.to_vec())
     }
 
@@ -262,6 +254,55 @@ impl WabbajackCDNDownloader {
 
         Ok(total_size)
     }
+
+    /// Validate WabbajackCDN file with base64-encoded MD5 hash
+    async fn validate_wabbajack_file(
+        &self,
+        file_path: &Path,
+        validation: &FileValidation,
+        progress_callback: Option<ProgressCallback>
+    ) -> Result<()> {
+        // Only validate if we have an MD5 hash (WabbajackCDN uses MD5 hashes in base64 format)
+        if let Some(ref expected_md5_base64) = validation.md5 {
+            // Read and hash the file
+            let file_data = tokio::fs::read(file_path).await
+                .map_err(|e| DownloadError::FileSystem {
+                    path: file_path.to_path_buf(),
+                    operation: FileOperation::Read,
+                    source: e
+                })?;
+
+            // Compute MD5 hash
+            let computed_md5 = md5::compute(&file_data);
+
+            // Convert computed hash to base64 (WabbajackCDN format)
+            let computed_md5_base64 = general_purpose::STANDARD.encode(computed_md5.as_ref());
+
+            // Compare base64 hashes
+            if &computed_md5_base64 != expected_md5_base64 {
+                // Delete the invalid file
+                let _ = tokio::fs::remove_file(file_path).await;
+
+                return Err(DownloadError::ValidationFailed {
+                    file: file_path.to_path_buf(),
+                    validation_type: ValidationType::Md5,
+                    expected: expected_md5_base64.clone(),
+                    actual: computed_md5_base64,
+                    suggestion: "File may be corrupted, try downloading again".to_string()
+                });
+            }
+
+            // Report validation success
+            if let Some(ref callback) = progress_callback {
+                callback(ProgressEvent::ValidationComplete {
+                    file: file_path.display().to_string(),
+                    valid: true,
+                });
+            }
+        }
+
+        Ok(())
+    }
 }
 
 impl Default for WabbajackCDNDownloader {
@@ -288,10 +329,12 @@ impl FileDownloader for WabbajackCDNDownloader {
             }),
         };
 
-        let dest_path = &request.destination;
+        // Construct the full destination path including filename
+        let filename = request.get_filename()?;
+        let dest_path = request.destination.join(&filename);
 
         // Check if file already exists and is valid
-        if let Some(result) = self.check_existing_file(dest_path, &request.validation, progress_callback.clone()).await? {
+        if let Some(result) = self.check_existing_file(&dest_path, &request.validation, progress_callback.clone()).await? {
             return Ok(result);
         }
 
@@ -306,7 +349,10 @@ impl FileDownloader for WabbajackCDNDownloader {
         }
 
         // Download the chunked file
-        let final_size = self.download_chunked_file(&url, dest_path, progress_callback, request.expected_size).await?;
+        let final_size = self.download_chunked_file(&url, &dest_path, progress_callback.clone(), request.expected_size).await?;
+
+        // Validate the complete assembled file using custom WabbajackCDN validation
+        self.validate_wabbajack_file(&dest_path, &request.validation, progress_callback).await?;
 
         Ok(DownloadResult::Downloaded {
             size: final_size

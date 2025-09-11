@@ -89,7 +89,7 @@ impl DownloadRequest {
     ///
     /// Returns the explicit filename if set, otherwise extracts it from the source.
     /// Falls back to a generic name if extraction fails.
-    pub(crate) fn get_filename(&self) -> Result<String> {
+    pub fn get_filename(&self) -> Result<String> {
         if let Some(ref filename) = self.filename {
             return Ok(filename.clone());
         }
@@ -116,6 +116,15 @@ impl DownloadRequest {
                     }
                 }
                 Ok("downloaded_file".to_string())
+            },
+            DownloadSource::GameFile(gamefile_source) => {
+                // Extract filename from the file path
+                if let Some(filename) = std::path::Path::new(&gamefile_source.file_path).file_name() {
+                    if let Some(filename_str) = filename.to_str() {
+                        return Ok(filename_str.to_string());
+                    }
+                }
+                Ok("game_file".to_string())
             },
             _ => {
                 // For other sources, we don't have a reliable way to extract filename

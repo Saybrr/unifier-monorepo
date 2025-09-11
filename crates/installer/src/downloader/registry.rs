@@ -7,7 +7,7 @@
 use crate::downloader::{
     core::{DownloadRequest, DownloadResult, ProgressCallback, DownloadError, Result, FileValidation},
     config::DownloadConfig,
-    backends::{HttpDownloader, WabbajackCDNDownloader},
+    backends::{HttpDownloader, WabbajackCDNDownloader, GameFileDownloader},
 };
 use async_trait::async_trait;
 
@@ -100,6 +100,13 @@ impl DownloaderRegistry {
         self.register(WabbajackCDNDownloader::new())
     }
 
+    /// Add a GameFile downloader with the given configuration
+    ///
+    /// This is a convenience method for adding GameFile support to the registry.
+    pub fn with_gamefile_downloader(self, config: DownloadConfig) -> Self {
+        self.register(GameFileDownloader::new(config))
+    }
+
     /// Find the appropriate downloader for a given URL
     ///
     /// This method iterates through registered downloaders and returns
@@ -116,7 +123,7 @@ impl DownloaderRegistry {
                 DownloadError::UnsupportedUrl {
                     url: url.to_string(),
                     scheme,
-                    supported_schemes: "http, https, wabbajack-cdn".to_string(),
+                    supported_schemes: "http, https, wabbajack-cdn, gamefile".to_string(),
                 }
             })
     }
@@ -132,11 +139,17 @@ impl DownloaderRegistry {
             crate::downloader::core::DownloadSource::WabbajackCDN(cdn_source) => {
                 self.find_downloader(&cdn_source.url).await
             },
+            crate::downloader::core::DownloadSource::GameFile(gamefile_source) => {
+                // Create a gamefile:// URL for the finder
+                let gamefile_url = format!("gamefile://{}/{}",
+                    gamefile_source.game, gamefile_source.file_path);
+                self.find_downloader(&gamefile_url).await
+            },
             _ => {
                 Err(DownloadError::UnsupportedUrl {
                     url: "structured_source".to_string(),
                     scheme: "structured".to_string(),
-                    supported_schemes: "http, https, wabbajack-cdn".to_string(),
+                    supported_schemes: "http, https, wabbajack-cdn, gamefile".to_string(),
                 })
             }
         }

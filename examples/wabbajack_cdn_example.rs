@@ -23,13 +23,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let modlist_json = r#"{
         "Archives": [
             {
-                "Hash": "test-hash-123",
-                "Meta": "[General]\ndirectURL=https://authored-files.wabbajack.org/test-file.zip",
-                "Name": "test-file.zip",
-                "Size": 1024000,
+                "Hash": "nTKgBjLzrFQ=",
+                "Meta": "[General]\ndirectURL=https://authored-files.wabbajack.org/xLODGen.129.7z_a9440abe-ca6c-48aa-ab31-4fe7e8f2484c",
+                "Name": "xLODGen.129.7z",
+                "Size": 16797898,
                 "State": {
                     "$type": "WabbajackCDNDownloader+State, Wabbajack.Lib",
-                    "Url": "https://authored-files.wabbajack.org/test-file"
+                    "Url": "https://authored-files.wabbajack.org/xLODGen.129.7z_a9440abe-ca6c-48aa-ab31-4fe7e8f2484c"
                 }
             }
         ],
@@ -68,15 +68,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Process each download request
     for (index, request) in download_requests.iter().enumerate() {
         println!("Request {}: {:?}", index + 1, request.source);
+        println!("  Destination: {}", request.destination.display());
+
+        // Show what filename will be used
+        match request.get_filename() {
+            Ok(filename) => {
+                let full_path = request.destination.join(&filename);
+                println!("  Target file: {}", full_path.display());
+                println!("  File exists: {}", full_path.exists());
+            }
+            Err(e) => {
+                println!("  Error getting filename: {}", e);
+            }
+        }
 
         // Find appropriate downloader
         match registry.find_downloader_for_request(request).await {
             Ok(_downloader) => {
                 println!("  ✓ Found compatible downloader");
 
+
+                //TODO: the hash verificiation is failing because we need to hash the final file, not the parts
                 // In a real scenario, you would call:
-                // let result = downloader.download(request, None).await?;
-                // println!("  ✓ Downloaded: {:?}", result);
+                let result = _downloader.download(request, None).await?;
+                println!("  ✓ Downloaded: {:?}", result);
             }
             Err(e) => {
                 println!("  ✗ No compatible downloader: {}", e);

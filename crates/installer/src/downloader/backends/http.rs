@@ -260,7 +260,32 @@ impl FileDownloader for HttpDownloader {
     }
 
     fn supports_url(&self, url: &str) -> bool {
-        url.starts_with("http://") || url.starts_with("https://")
+        if !url.starts_with("http://") && !url.starts_with("https://") {
+            return false;
+        }
+        
+        // Don't handle WabbajackCDN URLs - let the WabbajackCDN downloader handle those
+        if let Ok(parsed_url) = url::Url::parse(url) {
+            if let Some(host) = parsed_url.host_str() {
+                // Check if this is a WabbajackCDN domain
+                const WABBAJACK_DOMAINS: &[&str] = &[
+                    "wabbajack.b-cdn.net",
+                    "authored-files.wabbajack.org",
+                    "wabbajack-mirror.b-cdn.net",
+                    "mirror.wabbajack.org",
+                    "wabbajack-patches.b-cdn.net",
+                    "patches.wabbajack.org",
+                    "wabbajacktest.b-cdn.net",
+                    "test-files.wabbajack.org",
+                ];
+                
+                if WABBAJACK_DOMAINS.contains(&host) {
+                    return false; // Let WabbajackCDN downloader handle these
+                }
+            }
+        }
+        
+        true
     }
 }
 

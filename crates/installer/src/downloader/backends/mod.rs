@@ -6,6 +6,7 @@
 //! Currently supported:
 //! - HTTP/HTTPS downloads with resume support
 //! - WabbajackCDN chunked downloads
+//! - GameFile copying from game installations
 //!
 //! Future backends might include:
 //! - FTP downloads
@@ -14,7 +15,9 @@
 
 pub mod http;
 pub mod wabbajack_cdn;
+pub mod gamefile;
 
 // Re-export main implementations
 pub use http::HttpDownloader;
 pub use wabbajack_cdn::WabbajackCDNDownloader;
+pub use gamefile::GameFileDownloader;

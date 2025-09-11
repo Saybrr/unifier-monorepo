@@ -307,10 +307,21 @@ mod http_downloader_tests {
         let config = DownloadConfig::default();
         let downloader = HttpDownloader::new(config);
 
+        // Should support regular HTTP/HTTPS URLs
         assert!(downloader.supports_url("http://example.com/file.txt"));
         assert!(downloader.supports_url("https://example.com/file.txt"));
+        assert!(downloader.supports_url("https://github.com/user/repo/releases/download/v1.0/file.zip"));
+        
+        // Should not support non-HTTP protocols
         assert!(!downloader.supports_url("ftp://example.com/file.txt"));
         assert!(!downloader.supports_url("file:///local/file.txt"));
+        assert!(!downloader.supports_url("gamefile://SkyrimSpecialEdition/Data/Skyrim.esm"));
+        
+        // Should not support WabbajackCDN URLs (let WabbajackCDN downloader handle these)
+        assert!(!downloader.supports_url("https://authored-files.wabbajack.org/test.7z"));
+        assert!(!downloader.supports_url("https://wabbajack.b-cdn.net/test.7z"));
+        assert!(!downloader.supports_url("https://mirror.wabbajack.org/test.7z"));
+        assert!(!downloader.supports_url("https://patches.wabbajack.org/test.7z"));
     }
 
     #[tokio::test]
