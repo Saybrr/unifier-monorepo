@@ -23,9 +23,9 @@ The Installer library is a Rust-based file downloading and validation system des
 └────────────────────┘            └─────────────────┘
 ```
 
-## Downloader Module Architecture
+## NEW Simplified Downloader Architecture
 
-The downloader follows a clear layered architecture with well-defined data flow:
+The downloader now uses a trait-based architecture where each source handles its own download logic:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -35,42 +35,87 @@ The downloader follows a clear layered architecture with well-defined data flow:
 ┌─────────────────────────▼───────────────────────────────────┐
 │              EnhancedDownloader (lib.rs)                   │
 │  - Main user interface                                      │
-│  - Single/batch download orchestration                      │
+│  - Batch download orchestration with concurrency           │
 │  - Metrics collection                                       │
 └─────────────────────────┬───────────────────────────────────┘
                           │
-┌─────────────────────────▼───────────────────────────────────┐
-│                   Batch Operations                          │
-│  - download_with_retry()                                    │
-│  - download_batch_with_async_validation()                   │
-│  - Concurrency control                                      │
-│  - Async validation orchestration                           │
-└─────────────────────────┬───────────────────────────────────┘
+                ┌─────────▼─────────┐
+                │ DownloadRequest   │
+                │ with trait object │
+                │ Box<dyn Download> │
+                └─────────┬─────────┘
                           │
-┌─────────────────────────▼───────────────────────────────────┐
-│              DownloaderRegistry (registry.rs)              │
-│  - Backend selection based on download source               │
-│  - FileDownloader trait management                          │
-│  - Protocol routing                                         │
-└─────────────────────────┬───────────────────────────────────┘
-                          │
-┌─────────────────────────▼───────────────────────────────────┐
-│                Backend Implementations                      │
-│  ┌──────────────┐ ┌─────────────────┐ ┌─────────────────┐   │
-│  │HttpDownloader│ │WabbajackCDN     │ │GameFileDownloader│  │
-│  │- HTTP/HTTPS  │ │Downloader       │ │- Local file copy│   │
-│  │- Resume      │ │- Chunked DL     │ │- Game installs  │   │
-│  │- Mirrors     │ │- CDN optimized  │ │                 │   │
-│  └──────────────┘ └─────────────────┘ └─────────────────┘   │
-└─────────────────────────┬───────────────────────────────────┘
+          ┌───────────────┼───────────────┐
+          │               │               │
+┌─────────▼──────┐ ┌──────▼──────┐ ┌──────▼──────────┐
+│   HttpSource   │ │WabbajackCDN │ │ GameFileSource  │
+│impl Download   │ │Source impl  │ │impl Download    │
+│- HTTP/HTTPS    │ │Download     │ │- Local copy     │
+│- Resume        │ │- Chunked DL │ │- Game discovery │
+│- Mirrors       │ │- CDN optim  │ │                 │
+└────────────────┘ └─────────────┘ └─────────────────┘
                           │
 ┌─────────────────────────▼───────────────────────────────────┐
 │                    Core Types                               │
+│  - Downloadable trait                                       │
 │  - DownloadRequest/Result                                   │
 │  - FileValidation (CRC32, MD5, SHA256)                      │
 │  - ProgressEvent/Callback                                   │
 │  - Error handling                                           │
 └─────────────────────────────────────────────────────────────┘
+```
+
+## 🎯 **Key Architectural Changes & Benefits**
+
+### **Before: Registry-Based Architecture**
+- Central `DownloaderRegistry` routed downloads to appropriate backends
+- Separate backend files (`http.rs`, `wabbajack_cdn.rs`, `gamefile.rs`)
+- Complex batch orchestration with registry lookups
+- Concrete `DownloadSource` enum required pattern matching
+
+### **After: Trait-Based Architecture**
+- **Self-Contained Sources**: Each source type implements `Downloadable` trait
+- **Eliminated Registry**: No central routing needed - sources know how to download themselves
+- **Simplified API**: Just iterate through parsed operations and call `.download()` on each
+- **Better Encapsulation**: Download logic lives with the data it operates on
+
+### **Major Benefits**
+
+1. **🔧 Simpler Codebase**
+   - Removed ~1,500 lines of registry and backend code
+   - Clear separation: each source handles its own protocol
+   - No more complex routing logic
+
+2. **🏗️ More Idiomatic Rust**
+   - Uses trait system naturally with polymorphism
+   - Type-safe at compile time where possible
+   - Runtime dispatch only where needed (trait objects)
+
+3. **⚡ Better Performance**
+   - Eliminates registry lookup overhead
+   - Direct method calls on sources
+   - No intermediate conversions
+
+4. **🧪 Easier Testing**
+   - Mock individual source types easily
+   - Test each source in isolation
+   - Clearer test structure
+
+5. **🔄 More Extensible**
+   - Add new source types by just implementing `Downloadable`
+   - No need to modify registry or routing logic
+   - Plugin-friendly architecture
+
+### **Data Flow Comparison**
+
+**Old Flow:**
+```
+User Code → EnhancedDownloader → batch:: → Registry → Backend → Download
+```
+
+**New Flow:**
+```
+User Code → EnhancedDownloader → Source.download() → Result
 ```
 
 ### Core Components
@@ -292,3 +337,4 @@ src/
 ```
 
 This architecture provides a clean, extensible foundation for file downloading and installer functionality, with clear separation of concerns and strong type safety throughout.
+

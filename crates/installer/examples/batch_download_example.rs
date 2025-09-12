@@ -86,16 +86,17 @@ async fn main() -> installer::Result<()> {
         ),
 
         // Another small file with mirror URL demonstration
-        DownloadRequest::new_http(
-            "http://localhost:80/status/500", // This will fail
-            temp_dir.path()
-        )
-        .with_mirror_url("http://localhost:80/bytes/2048") // Fallback will work
-        .with_filename("fallback_file.bin")
-        .with_validation(
-            FileValidation::new()
-                .with_expected_size(2048)
-        ),
+        {
+            use installer::parse_wabbajack::sources::HttpSource;
+            let http_source = HttpSource::new("http://localhost:80/status/500")
+                .with_mirror("http://localhost:80/bytes/2048");
+            DownloadRequest::from_source(http_source, temp_dir.path())
+                .with_filename("fallback_file.bin")
+                .with_validation(
+                    FileValidation::new()
+                        .with_expected_size(2048)
+                )
+        },
 
         // File with intentional validation failure to demonstrate retry
         DownloadRequest::new_http(

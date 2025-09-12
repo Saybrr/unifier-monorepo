@@ -11,7 +11,7 @@
 
 use installer::{
     // Downloader components
-    DownloadConfigBuilder, EnhancedDownloader, DownloaderRegistry,
+    DownloadConfigBuilder, EnhancedDownloader,
     ConsoleProgressReporter, IntoProgressCallback,
 
     // Wabbajack parsing components
@@ -19,7 +19,7 @@ use installer::{
     DownloadOperation, ArchiveManifest,
 
     // Source types for creating custom operations
-    WabbajackDownloadSource, HttpSource, NexusSource
+    WabbajackDownloadSource, HttpSource,
 };
 use std::path::PathBuf;
 use tokio;
@@ -146,12 +146,8 @@ async fn demo_advanced_batch_processing() -> Result<(), Box<dyn std::error::Erro
         .user_agent("StructuredDownloader/1.0")
         .build();
 
-    // Create a basic registry (in real usage, you'd add Nexus/GameFile downloaders too)
-    let registry = DownloaderRegistry::new()
-        .with_http_downloader(config.clone());
-
-    // Create the enhanced downloader
-    let downloader = EnhancedDownloader::with_registry(registry, config);
+    // Create the enhanced downloader (no registry needed)
+    let downloader = EnhancedDownloader::new(config);
 
     // Create some test HTTP operations (only HTTP works in this demo)
     let test_operations = vec![

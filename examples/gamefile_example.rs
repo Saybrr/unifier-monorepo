@@ -3,12 +3,11 @@
 //! This example shows how to use the GameFileDownloader to copy files
 //! from a game installation directory to a destination.
 
-use installer::downloader::{
-    core::{DownloadRequest, ProgressReporter, IntoProgressCallback},
-    config::DownloadConfig,
-    registry::DownloaderRegistry,
+use installer::{
+    DownloadRequest, DownloadConfig, EnhancedDownloader,
+    ProgressReporter, IntoProgressCallback,
 };
-use installer::parse_wabbajack::sources::{DownloadSource, GameFileSource};
+use installer::parse_wabbajack::sources::GameFileSource;
 use std::path::PathBuf;
 use std::time::Duration;
 use tokio;
@@ -70,9 +69,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ..Default::default()
     };
 
-    // Create registry with GameFile support
-    let registry = DownloaderRegistry::new()
-        .with_gamefile_downloader(config);
+    // Create enhanced downloader (no registry needed)
+    let downloader = EnhancedDownloader::new(config);
 
     // Create a GameFile source
     // This example tries to copy a file from Skyrim Special Edition
@@ -82,20 +80,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "1.6.659.0"
     );
 
-    // Create download request
-    let request = DownloadRequest::new(
-        DownloadSource::GameFile(gamefile_source),
+    // Create download request with trait object
+    let request = DownloadRequest::from_source(
+        gamefile_source,
         PathBuf::from("./downloads")
     );
 
-    info!("Attempting to copy game file: {}", request.source.description());
+    info!("Attempting to copy game file: {}", request.get_description());
 
     // Set up progress reporting
     let progress_reporter = ExampleProgressReporter;
     let progress_callback = progress_reporter.into_callback();
 
     // Attempt the download
-    match registry.attempt_download(&request, Some(progress_callback)).await {
+    match downloader.download(request, Some(progress_callback)).await {
         Ok(result) => {
             println!("✅ Success! Result: {:?}", result);
         }

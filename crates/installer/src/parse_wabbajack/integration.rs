@@ -43,7 +43,29 @@ pub fn operation_to_download_request(
         };
     }
 
-    DownloadRequest::new(operation.source.clone(), parent_dir)
+    // Create a download request from the source
+    let downloadable_source: Box<dyn crate::downloader::core::Downloadable> = match &operation.source {
+        crate::parse_wabbajack::sources::DownloadSource::Http(http_source) => {
+            Box::new(http_source.clone())
+        },
+        crate::parse_wabbajack::sources::DownloadSource::WabbajackCDN(cdn_source) => {
+            Box::new(cdn_source.clone())
+        },
+        crate::parse_wabbajack::sources::DownloadSource::GameFile(gamefile_source) => {
+            Box::new(gamefile_source.clone())
+        },
+        crate::parse_wabbajack::sources::DownloadSource::Nexus(nexus_source) => {
+            Box::new(nexus_source.clone())
+        },
+        crate::parse_wabbajack::sources::DownloadSource::Manual(manual_source) => {
+            Box::new(manual_source.clone())
+        },
+        crate::parse_wabbajack::sources::DownloadSource::Archive(archive_source) => {
+            Box::new(archive_source.clone())
+        },
+    };
+
+    DownloadRequest::new(downloadable_source, parent_dir)
         .with_filename(operation.filename.clone())
         .with_validation(validation)
         .with_expected_size(operation.expected_size)

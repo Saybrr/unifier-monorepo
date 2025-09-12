@@ -31,9 +31,7 @@
 // Module declarations following the hierarchy
 pub mod config;
 pub mod core;
-pub mod registry;
 pub mod batch;
-pub mod backends;
 pub mod r#lib;
 
 // Re-export main types for backward compatibility and ease of use
@@ -51,12 +49,6 @@ pub use config::{DownloadConfig, DownloadConfigBuilder};
 
 // Main entry point
 pub use r#lib::EnhancedDownloader;
-
-// Registry and traits
-pub use registry::{FileDownloader, DownloaderRegistry};
-
-// Backend implementations
-pub use backends::{HttpDownloader, WabbajackCDNDownloader};
 
 // Batch operations and metrics
 pub use batch::{DownloadMetrics, DownloadMetricsSnapshot, BatchDownloadResult};

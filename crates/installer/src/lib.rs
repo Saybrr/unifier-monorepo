@@ -65,8 +65,7 @@ pub mod parse_wabbajack;
 // Re-export commonly used types for convenience
 pub use downloader::{
     // Core types
-    DownloadRequest, DownloadResult, EnhancedDownloader, FileDownloader,
-    DownloaderRegistry, ValidationHandle,
+    DownloadRequest, DownloadResult, EnhancedDownloader, ValidationHandle,
 
     // Configuration
     DownloadConfig, DownloadConfigBuilder,
@@ -77,9 +76,6 @@ pub use downloader::{
     // Progress tracking
     ProgressCallback, ProgressEvent, ProgressReporter, IntoProgressCallback,
     ConsoleProgressReporter, NullProgressReporter, CompositeProgressReporter,
-
-    // Downloaders
-    HttpDownloader,
 
     // Batch operations and metrics
     BatchDownloadResult, DownloadMetrics, DownloadMetricsSnapshot,

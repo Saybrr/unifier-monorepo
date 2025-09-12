@@ -19,6 +19,7 @@ use crate::downloader::{
     config::DownloadConfig,
     core::{DownloadRequest, DownloadResult, ProgressCallback, Result, ValidationPool},
     batch::{DownloadMetrics},
+    registry::DownloaderRegistry,
 };
 use std::sync::Arc;
 
@@ -31,18 +32,28 @@ use std::sync::Arc;
 /// - Built-in performance metrics
 /// - Mirror URL fallback support
 pub struct EnhancedDownloader {
+    registry: DownloaderRegistry,
     config: DownloadConfig,
     validation_pool: ValidationPool,
     metrics: Arc<DownloadMetrics>,
 }
 
 impl EnhancedDownloader {
-    /// Create a new downloader
+    /// Create a new downloader with default HTTP backend
     pub fn new(config: DownloadConfig) -> Self {
         let validation_pool = ValidationPool::new(config.max_concurrent_validations);
+        let registry = DownloaderRegistry::new()
+            .with_http_downloader(config.clone());
         let metrics = Arc::new(DownloadMetrics::default());
 
-        Self { config, validation_pool, metrics }
+        Self { registry, config, validation_pool, metrics }
+    }
+
+    /// Create a downloader with a custom registry
+    pub fn with_registry(registry: DownloaderRegistry, config: DownloadConfig) -> Self {
+        let validation_pool = ValidationPool::new(config.max_concurrent_validations);
+        let metrics = Arc::new(DownloadMetrics::default());
+        Self { registry, config, validation_pool, metrics }
     }
 
     /// Get access to built-in performance metrics
@@ -52,28 +63,37 @@ impl EnhancedDownloader {
 
     /// Download a single file with retry logic and mirror fallback
     ///
-    /// With the new trait-based architecture, each source handles its own download logic
+    /// This method delegates to batch::download_with_retry for the actual implementation
     pub async fn download(
         &self,
         request: DownloadRequest,
         progress_callback: Option<ProgressCallback>,
     ) -> Result<DownloadResult> {
-        // Simply delegate to the source's download method
-        request.source.download(&request, progress_callback, &self.config).await
+        crate::downloader::batch::download_with_retry(
+            &self.registry,
+            &self.config,
+            &self.metrics,
+            request,
+            progress_callback,
+        ).await
     }
 
     /// Download a file with async validation option
     ///
-    /// For now, this just calls the regular download method since validation
-    /// is handled within each source's download implementation
+    /// This allows validation to run in the background while other downloads continue
     pub async fn download_with_async_validation(
         &self,
         request: DownloadRequest,
         progress_callback: Option<ProgressCallback>,
     ) -> Result<DownloadResult> {
-        // For simplicity, we'll just use the regular download method
-        // Each source handles its own validation
-        self.download(request, progress_callback).await
+        crate::downloader::batch::download_with_async_validation(
+            &self.registry,
+            &self.config,
+            &self.validation_pool,
+            &self.metrics,
+            request,
+            progress_callback,
+        ).await
     }
 
     /// Download multiple files concurrently
@@ -85,42 +105,37 @@ impl EnhancedDownloader {
         progress_callback: Option<ProgressCallback>,
         max_concurrent: usize,
     ) -> Vec<Result<DownloadResult>> {
-        use futures::stream::{FuturesUnordered, StreamExt};
-        use tokio::sync::Semaphore;
-        use std::sync::Arc;
-
-        let semaphore = Arc::new(Semaphore::new(max_concurrent));
-        let mut futures = FuturesUnordered::new();
-
-        for request in requests {
-            let semaphore = Arc::clone(&semaphore);
-            let config = self.config.clone();
-            let progress_callback = progress_callback.clone();
-
-            futures.push(async move {
-                let _permit = semaphore.acquire().await.unwrap();
-                request.source.download(&request, progress_callback, &config).await
-            });
-        }
-
-        let mut results = Vec::new();
-        while let Some(result) = futures.next().await {
-            results.push(result);
-        }
-
-        results
+        crate::downloader::batch::download_batch(
+            &self.registry,
+            &self.config,
+            &self.metrics,
+            requests,
+            progress_callback,
+            max_concurrent,
+        ).await
     }
 
     /// Download multiple files with async validation and validation retry
     ///
-    /// For now, this is the same as download_batch since each source
-    /// handles its own validation
+    /// This is the most advanced batch download method, providing:
+    /// - Concurrent downloads
+    /// - Background async validation
+    /// - Automatic retry of failed validations
+    /// - Built-in performance metrics
     pub async fn download_batch_with_async_validation(
         &self,
         requests: Vec<DownloadRequest>,
         progress_callback: Option<ProgressCallback>,
         max_concurrent_downloads: usize,
     ) -> Vec<Result<DownloadResult>> {
-        self.download_batch(requests, progress_callback, max_concurrent_downloads).await
+        crate::downloader::batch::download_batch_with_async_validation(
+            &self.registry,
+            &self.config,
+            &self.validation_pool,
+            &self.metrics,
+            requests,
+            progress_callback,
+            max_concurrent_downloads,
+        ).await
     }
 }

@@ -6,7 +6,7 @@
 //! - Converting parsed operations to download requests
 
 use installer::{
-    downloader::{DownloaderRegistry, DownloadConfigBuilder},
+    EnhancedDownloader, DownloadConfigBuilder,
     parse_wabbajack::{
         parser::parse_modlist,
         integration::manifest_to_download_requests,
@@ -55,19 +55,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Generated {} download requests", download_requests.len());
 
-    // Set up the downloader registry with WabbajackCDN support
+    // Set up the enhanced downloader (no registry needed)
     let config = DownloadConfigBuilder::new()
         .max_retries(3)
         .timeout(std::time::Duration::from_secs(30))
         .build();
 
-    let registry = DownloaderRegistry::new()
-        .with_http_downloader(config)
-        .with_wabbajack_cdn_downloader();
+    let downloader = EnhancedDownloader::new(config);
 
     // Process each download request
-    for (index, request) in download_requests.iter().enumerate() {
-        println!("Request {}: {:?}", index + 1, request.source);
+    for (index, request) in download_requests.into_iter().enumerate() {
+        println!("Request {}: {}", index + 1, request.get_description());
         println!("  Destination: {}", request.destination.display());
 
         // Show what filename will be used
@@ -82,19 +80,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
 
-        // Find appropriate downloader
-        match registry.find_downloader_for_request(request).await {
-            Ok(_downloader) => {
-                println!("  ✓ Found compatible downloader");
-
-
-                //TODO: the hash verificiation is failing because we need to hash the final file, not the parts
-                // In a real scenario, you would call:
-                let result = _downloader.download(request, None).await?;
+        // Download using the enhanced downloader
+        // Each source handles its own download logic
+        match downloader.download(request, None).await {
+            Ok(result) => {
                 println!("  ✓ Downloaded: {:?}", result);
             }
             Err(e) => {
-                println!("  ✗ No compatible downloader: {}", e);
+                println!("  ✗ Download failed: {}", e);
             }
         }
     }
@@ -151,16 +144,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_downloader_registry_supports_wabbajack_cdn() {
-        let registry = DownloaderRegistry::new()
-            .with_wabbajack_cdn_downloader();
+    async fn test_enhanced_downloader_creation() {
+        use installer::DownloadConfigBuilder;
 
-        // Test with a WabbajackCDN URL
-        let downloader = registry.find_downloader("https://authored-files.wabbajack.org/test").await;
-        assert!(downloader.is_ok());
+        let config = DownloadConfigBuilder::new().build();
+        let downloader = EnhancedDownloader::new(config);
 
-        // Test with a regular HTTP URL (should fail without HTTP downloader)
-        let downloader = registry.find_downloader("https://example.com/test").await;
-        assert!(downloader.is_err());
+        // Test that the downloader can be created
+        assert!(downloader.metrics().successful_downloads.load(std::sync::atomic::Ordering::Relaxed) == 0);
     }
 }

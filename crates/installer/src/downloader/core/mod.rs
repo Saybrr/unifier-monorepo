@@ -13,18 +13,65 @@ pub use validation::{FileValidation, ValidationHandle, ValidationPool};
 pub use progress::{ProgressEvent, ProgressCallback, ProgressReporter, IntoProgressCallback, ConsoleProgressReporter, NullProgressReporter, CompositeProgressReporter};
 
 use std::path::PathBuf;
+use async_trait::async_trait;
 
 // Re-export the structured DownloadSource for convenience
 pub use crate::parse_wabbajack::sources::DownloadSource;
 
+/// Trait for types that can download files
+///
+/// This trait allows each download source type to implement its own download logic,
+/// eliminating the need for a central registry and making the code more modular.
+#[async_trait]
+pub trait Downloadable: Send + Sync {
+    /// Download the file to the specified destination
+    ///
+    /// # Arguments
+    /// * `request` - The download request containing destination, validation, etc.
+    /// * `progress_callback` - Optional progress reporting callback
+    /// * `config` - Download configuration (timeouts, user agent, etc.)
+    ///
+    /// # Returns
+    /// Result containing the download result with size information
+    async fn download(
+        &self,
+        request: &DownloadRequest,
+        progress_callback: Option<ProgressCallback>,
+        config: &crate::downloader::config::DownloadConfig,
+    ) -> Result<DownloadResult>;
+
+    /// Check if this source supports resume functionality
+    fn supports_resume(&self) -> bool {
+        false
+    }
+
+    /// Check if this source can validate using the provided validation method
+    fn can_validate(&self, validation: &FileValidation) -> bool {
+        // By default, assume we can validate any method
+        true
+    }
+
+    /// Get a description of this download source for logging/UI
+    fn description(&self) -> String;
+
+    /// Check if this source requires user interaction (e.g., manual downloads)
+    fn requires_user_interaction(&self) -> bool {
+        false
+    }
+
+    /// Check if this source requires external dependencies (API keys, game installations, etc.)
+    fn requires_external_dependencies(&self) -> bool {
+        false
+    }
+}
+
 /// A download request containing all necessary information
 ///
 /// This is the main data structure that flows through the entire download system.
-/// It uses structured download sources for type safety and performance.
-#[derive(Debug, Clone)]
+/// It uses downloadable trait objects for polymorphic downloading.
 pub struct DownloadRequest {
-    /// The download source
-    pub source: DownloadSource,
+    /// The download source (trait object for polymorphic downloading)
+    pub source: Box<dyn Downloadable>,
     /// Directory where the file should be saved
     pub destination: PathBuf,
     /// Validation requirements for the downloaded file
@@ -35,12 +82,24 @@ pub struct DownloadRequest {
     pub expected_size: Option<u64>,
 }
 
+impl std::fmt::Debug for DownloadRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DownloadRequest")
+            .field("source", &self.source.description())
+            .field("destination", &self.destination)
+            .field("validation", &self.validation)
+            .field("filename", &self.filename)
+            .field("expected_size", &self.expected_size)
+            .finish()
+    }
+}
+
 impl DownloadRequest {
     /// Create a new download request with HTTP URL and destination
     pub fn new_http<S: Into<String>, P: Into<PathBuf>>(url: S, destination: P) -> Self {
         use crate::parse_wabbajack::sources::HttpSource;
         Self {
-            source: DownloadSource::Http(HttpSource::new(url)),
+            source: Box::new(HttpSource::new(url)),
             destination: destination.into(),
             validation: FileValidation::default(),
             filename: None,
@@ -48,8 +107,8 @@ impl DownloadRequest {
         }
     }
 
-    /// Create a new download request with any structured source
-    pub fn new<P: Into<PathBuf>>(source: DownloadSource, destination: P) -> Self {
+    /// Create a new download request with any downloadable source
+    pub fn new<P: Into<PathBuf>>(source: Box<dyn Downloadable>, destination: P) -> Self {
         Self {
             source,
             destination: destination.into(),
@@ -59,12 +118,9 @@ impl DownloadRequest {
         }
     }
 
-    /// Add a mirror URL for HTTP sources
-    pub fn with_mirror_url<S: Into<String>>(mut self, mirror_url: S) -> Self {
-        if let DownloadSource::Http(ref mut http_source) = self.source {
-            http_source.mirror_urls.push(mirror_url.into());
-        }
-        self
+    /// Create a download request from a concrete source type
+    pub fn from_source<T: Downloadable + 'static, P: Into<PathBuf>>(source: T, destination: P) -> Self {
+        Self::new(Box::new(source), destination)
     }
 
     /// Set validation requirements
@@ -87,75 +143,37 @@ impl DownloadRequest {
 
     /// Get the filename for this download
     ///
-    /// Returns the explicit filename if set, otherwise extracts it from the source.
-    /// Falls back to a generic name if extraction fails.
+    /// Returns the explicit filename if set, otherwise falls back to "downloaded_file".
+    /// With trait objects, filename extraction is more complex so we encourage
+    /// setting explicit filenames.
     pub fn get_filename(&self) -> Result<String> {
         if let Some(ref filename) = self.filename {
             return Ok(filename.clone());
         }
 
-        match &self.source {
-            DownloadSource::Http(http_source) => {
-                let parsed_url = url::Url::parse(&http_source.url)?;
-                if let Some(segments) = parsed_url.path_segments() {
-                    if let Some(last_segment) = segments.last() {
-                        if !last_segment.is_empty() {
-                            return Ok(last_segment.to_string());
-                        }
-                    }
-                }
-                Ok("downloaded_file".to_string())
-            },
-            DownloadSource::WabbajackCDN(cdn_source) => {
-                let parsed_url = url::Url::parse(&cdn_source.url)?;
-                if let Some(segments) = parsed_url.path_segments() {
-                    if let Some(last_segment) = segments.last() {
-                        if !last_segment.is_empty() {
-                            return Ok(last_segment.to_string());
-                        }
-                    }
-                }
-                Ok("downloaded_file".to_string())
-            },
-            DownloadSource::GameFile(gamefile_source) => {
-                // Extract filename from the file path
-                if let Some(filename) = std::path::Path::new(&gamefile_source.file_path).file_name() {
-                    if let Some(filename_str) = filename.to_str() {
-                        return Ok(filename_str.to_string());
-                    }
-                }
-                Ok("game_file".to_string())
-            },
-            _ => {
-                // For other sources, we don't have a reliable way to extract filename
-                // so we return a generic name - the caller should set explicit filename
-                Ok("downloaded_file".to_string())
-            }
-        }
+        // With trait objects, we can't easily extract filenames from URLs
+        // so we fall back to a generic name. Users should set explicit filenames.
+        Ok("downloaded_file".to_string())
     }
 
-    /// Get the primary URL for this download (if it has one)
-    pub fn get_primary_url(&self) -> Option<&str> {
-        match &self.source {
-            DownloadSource::Http(http_source) => Some(&http_source.url),
-            DownloadSource::WabbajackCDN(cdn_source) => Some(&cdn_source.url),
-            _ => None,
-        }
+    /// Get a description of the download source
+    pub fn get_description(&self) -> String {
+        self.source.description()
     }
 
-    /// Get the mirror URLs for this download (if it has any)
-    pub fn get_mirror_urls(&self) -> Vec<&str> {
-        match &self.source {
-            DownloadSource::Http(http_source) => {
-                http_source.mirror_urls.iter().map(|s| s.as_str()).collect()
-            },
-            _ => Vec::new(),
-        }
+    /// Check if this download requires user interaction
+    pub fn requires_user_interaction(&self) -> bool {
+        self.source.requires_user_interaction()
     }
 
-    /// Get the download source
-    pub fn get_source(&self) -> &DownloadSource {
-        &self.source
+    /// Check if this download requires external dependencies
+    pub fn requires_external_dependencies(&self) -> bool {
+        self.source.requires_external_dependencies()
+    }
+
+    /// Check if this source supports resume functionality
+    pub fn supports_resume(&self) -> bool {
+        self.source.supports_resume()
     }
 }
 

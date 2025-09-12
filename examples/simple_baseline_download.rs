@@ -7,14 +7,13 @@
 
 use installer::{
     // Downloader components
-    DownloadConfigBuilder, EnhancedDownloader, DownloaderRegistry,
+    DownloadConfigBuilder, EnhancedDownloader,
     IntoProgressCallback,
 
     // Wabbajack parsing components
     parse_modlist, manifest_to_download_requests_with_stats,
 };
-use installer::downloader::core::FileValidation;
-use installer::downloader::core::progress::ProgressReporter;
+use installer::{FileValidation, ProgressReporter};
 use std::{path::PathBuf, fs, sync::Arc, io::{self, Write}};
 use tokio;
 
@@ -157,16 +156,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         false // Don't include manual downloads
     );
 
-    // Filter out unsupported source types (only keep HTTP, WabbajackCDN, GameFile)
+    // Filter out manual downloads and sources that require user interaction
     let download_requests: Vec<_> = all_requests.into_iter()
-        .filter(|request| {
-            use installer::downloader::core::DownloadSource;
-            matches!(&request.source,
-                DownloadSource::Http(_) |
-                DownloadSource::WabbajackCDN(_) |
-                DownloadSource::GameFile(_)
-            )
-        })
+        .filter(|request| !request.requires_user_interaction())
         .collect();
 
     let filtered_count = stats.converted_requests - download_requests.len();
@@ -190,12 +182,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .timeout(std::time::Duration::from_secs(60))
         .build();
 
-    let registry = DownloaderRegistry::new()
-        .with_http_downloader(config.clone())
-        .with_wabbajack_cdn_downloader()
-        .with_gamefile_downloader(config.clone());
-
-    let downloader = EnhancedDownloader::with_registry(registry, config);
+    // Create enhanced downloader (no registry needed in new architecture)
+    let downloader = EnhancedDownloader::new(config);
 
     // Set up progress reporting
     let progress_reporter = InPlaceProgressReporter::new();
