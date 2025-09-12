@@ -153,18 +153,14 @@ impl std::fmt::Display for FileOperation {
 /// Types of validation for error context
 #[derive(Debug, Clone, PartialEq)]
 pub enum ValidationType {
-    Crc32,
-    Md5,
-    Sha256,
+    XxHash64,
     Size,
 }
 
 impl std::fmt::Display for ValidationType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ValidationType::Crc32 => write!(f, "CRC32"),
-            ValidationType::Md5 => write!(f, "MD5"),
-            ValidationType::Sha256 => write!(f, "SHA256"),
+            ValidationType::XxHash64 => write!(f, "xxHash64"),
             ValidationType::Size => write!(f, "file size"),
         }
     }

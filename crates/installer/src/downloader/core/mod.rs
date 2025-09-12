@@ -46,8 +46,8 @@ pub trait Downloadable: Send + Sync {
     }
 
     /// Check if this source can validate using the provided validation method
-    fn can_validate(&self, validation: &FileValidation) -> bool {
-        // By default, assume we can validate any method
+    fn can_validate(&self, _validation: &FileValidation) -> bool {
+        // By default, assume we can validate any method (only xxHash64 is supported)
         true
     }
 

@@ -94,7 +94,7 @@ impl ProgressReporter for InPlaceProgressReporter {
         println!("✅ Completed: {} ({:.1} MB)", filename, final_size as f64 / 1_048_576.0);
     }
 
-    fn on_validation_started(&self, file: &str) {
+    fn on_validation_started(&self, file: &str, _validation: &installer::FileValidation) {
         let filename = Self::extract_filename(file);
         Self::clear_line();
         print!("🔍 Validating: {}", filename);

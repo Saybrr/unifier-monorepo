@@ -236,18 +236,31 @@ impl Downloadable for HttpSource {
 
         // Validate the downloaded file (only if validation is specified)
         if !request.validation.is_empty() {
-            debug!("Validating downloaded file");
-            if !request.validation.validate_file(&dest_path, progress_callback).await? {
-                fs::remove_file(&dest_path).await?;
-                return Err(DownloadError::ValidationFailed {
-                    file: dest_path.clone(),
-                    validation_type: ValidationType::Size,
-                    expected: "valid file".to_string(),
-                    actual: "invalid file".to_string(),
-                    suggestion: "Check file integrity or download again".to_string(),
-                });
+            debug!("Validating HTTP downloaded file: {} (expected_size: {:?})",
+                   dest_path.display(), request.validation.expected_size);
+
+            match request.validation.validate_file(&dest_path, progress_callback).await {
+                Ok(true) => {
+                    debug!("HTTP file validation passed");
+                },
+                Ok(false) => {
+                    // This shouldn't happen as validate_file returns Err for failures
+                    fs::remove_file(&dest_path).await?;
+                    return Err(DownloadError::ValidationFailed {
+                        file: dest_path.clone(),
+                        validation_type: ValidationType::Size,
+                        expected: "valid file".to_string(),
+                        actual: "invalid file".to_string(),
+                        suggestion: "Check file integrity or download again".to_string(),
+                    });
+                },
+                Err(e) => {
+                    // Log the specific validation error (like SizeMismatch)
+                    debug!("HTTP file validation failed with error: {}", e);
+                    fs::remove_file(&dest_path).await?;
+                    return Err(e); // Propagate the specific error (e.g., SizeMismatch)
+                }
             }
-            debug!("File validation passed");
         }
 
         Ok(DownloadResult::Downloaded { size })
@@ -389,6 +402,7 @@ impl HttpSource {
         }
 
         file.flush().await?;
+        file.sync_all().await?; // Ensure file is fully written to disk before rename
 
         // Move temp file to final destination
         fs::rename(&temp_path, dest_path).await?;
@@ -667,37 +681,39 @@ impl WabbajackCDNSource {
         }
 
         output_file.flush().await?;
+        output_file.sync_all().await?; // Ensure file is fully written to disk before validation
         Ok(total_size)
     }
 
-    /// Validate WabbajackCDN file with base64-encoded MD5 hash
+    /// Validate WabbajackCDN file with base64-encoded xxHash64 hash
     async fn validate_wabbajack_file(
         &self,
         file_path: &Path,
         validation: &crate::downloader::core::FileValidation,
         progress_callback: Option<ProgressCallback>
     ) -> Result<()> {
-        // Only validate if we have an MD5 hash (WabbajackCDN uses MD5 hashes in base64 format)
-        if let Some(ref expected_md5_base64) = validation.md5 {
+        // Only validate if we have an xxHash64 hash (WabbajackCDN now uses xxHash64 hashes in base64 format)
+        if let Some(ref expected_hash_base64) = validation.xxhash64_base64 {
             // Read and hash the file
             let file_data = fs::read(file_path).await?;
 
-            // Compute MD5 hash
-            let computed_md5 = md5::compute(&file_data);
+            // Compute xxHash64 hash
+            let computed_hash = xxhash_rust::xxh64::xxh64(&file_data, 0);
 
             // Convert computed hash to base64 (WabbajackCDN format)
-            let computed_md5_base64 = general_purpose::STANDARD.encode(computed_md5.as_ref());
+            let computed_hash_bytes = computed_hash.to_le_bytes();
+            let computed_hash_base64 = general_purpose::STANDARD.encode(&computed_hash_bytes);
 
             // Compare base64 hashes
-            if &computed_md5_base64 != expected_md5_base64 {
+            if &computed_hash_base64 != expected_hash_base64 {
                 // Delete the invalid file
                 let _ = fs::remove_file(file_path).await;
 
                 return Err(DownloadError::ValidationFailed {
                     file: file_path.to_path_buf(),
-                    validation_type: ValidationType::Md5,
-                    expected: expected_md5_base64.clone(),
-                    actual: computed_md5_base64,
+                    validation_type: ValidationType::XxHash64,
+                    expected: expected_hash_base64.clone(),
+                    actual: computed_hash_base64,
                     suggestion: "File may be corrupted, try downloading again".to_string()
                 });
             }
@@ -771,18 +787,31 @@ impl Downloadable for GameFileSource {
 
         // Validate the copied file (only if validation is specified)
         if !request.validation.is_empty() {
-            debug!("Validating copied game file");
-            if !request.validation.validate_file(&dest_path, progress_callback).await? {
-                fs::remove_file(&dest_path).await?;
-                return Err(DownloadError::ValidationFailed {
-                    file: dest_path.clone(),
-                    validation_type: ValidationType::Size,
-                    expected: "valid file".to_string(),
-                    actual: "invalid file".to_string(),
-                    suggestion: "Check game file integrity or reinstall the game".to_string(),
-                });
+            debug!("Validating copied game file: {} (expected_size: {:?})",
+                   dest_path.display(), request.validation.expected_size);
+
+            match request.validation.validate_file(&dest_path, progress_callback).await {
+                Ok(true) => {
+                    debug!("Game file validation passed");
+                },
+                Ok(false) => {
+                    // This shouldn't happen as validate_file returns Err for failures
+                    fs::remove_file(&dest_path).await?;
+                    return Err(DownloadError::ValidationFailed {
+                        file: dest_path.clone(),
+                        validation_type: ValidationType::Size,
+                        expected: "valid file".to_string(),
+                        actual: "invalid file".to_string(),
+                        suggestion: "Check game file integrity or reinstall the game".to_string(),
+                    });
+                },
+                Err(e) => {
+                    // Log the specific validation error (like SizeMismatch)
+                    debug!("Game file validation failed with error: {}", e);
+                    fs::remove_file(&dest_path).await?;
+                    return Err(e); // Propagate the specific error (e.g., SizeMismatch)
+                }
             }
-            debug!("Game file validation passed");
         }
 
         Ok(DownloadResult::Downloaded { size })
@@ -986,6 +1015,7 @@ impl GameFileSource {
         }
 
         dest_file.flush().await?;
+        dest_file.sync_all().await?; // Ensure file is fully written to disk before validation
 
         // Report completion
         if let Some(ref callback) = progress_callback {

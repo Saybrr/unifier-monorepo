@@ -112,7 +112,7 @@ impl ModlistParser {
     /// Create a new parser with default settings
     pub fn new() -> Self {
         Self {
-            default_hash_algorithm: "SHA256".to_string(),
+            default_hash_algorithm: "XXHASH64".to_string(),
         }
     }
 

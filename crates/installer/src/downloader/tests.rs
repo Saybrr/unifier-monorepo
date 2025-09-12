@@ -5,9 +5,10 @@ use crate::downloader::{
     core::{ErrorSeverity, FileOperation, ValidationType, IntoProgressCallback, NullProgressReporter, ConsoleProgressReporter, CompositeProgressReporter},
 };
 use std::path::PathBuf;
-use crc32fast::Hasher as Crc32Hasher;
 use std::sync::{Arc, Mutex};
 use tempfile::{tempdir, TempDir};
+use base64;
+use xxhash_rust;
 use wiremock::{
     matchers::{method, path},
     Mock, MockServer, ResponseTemplate,
@@ -64,27 +65,11 @@ async fn create_test_file(content: &[u8]) -> (TempDir, PathBuf) {
     (temp_dir, file_path)
 }
 
-/// Calculate CRC32 of data
-fn calculate_crc32(data: &[u8]) -> u32 {
-    let mut hasher = Crc32Hasher::new();
-    hasher.update(data);
-    hasher.finalize()
-}
-
-/// Calculate MD5 hash of data
-fn calculate_md5(data: &[u8]) -> String {
-    let mut hasher = md5::Context::new();
-    hasher.consume(data);
-    format!("{:x}", hasher.compute())
-}
-
-/// Calculate SHA256 hash of data
-fn calculate_sha256(data: &[u8]) -> String {
-    use digest::Digest;
-    use sha2::Sha256;
-    let mut hasher = Sha256::new();
-    hasher.update(data);
-    format!("{:x}", hasher.finalize())
+/// Calculate xxHash64 of data and return as base64 string (matching Wabbajack format)
+fn calculate_xxhash64_base64(data: &[u8]) -> String {
+    let hash = xxhash_rust::xxh64::xxh64(data, 0);
+    let bytes = hash.to_le_bytes();
+    base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &bytes)
 }
 
 #[cfg(test)]
@@ -92,12 +77,12 @@ mod file_validation_tests {
     use super::*;
 
     #[tokio::test]
-    async fn test_file_validation_crc32_success() {
+    async fn test_file_validation_xxhash64_success() {
         let test_data = b"Hello, World!";
-        let expected_crc32 = calculate_crc32(test_data);
+        let expected_hash = calculate_xxhash64_base64(test_data);
         let (_temp_dir, file_path) = create_test_file(test_data).await;
 
-        let validation = FileValidation::new().with_crc32(expected_crc32);
+        let validation = FileValidation::new().with_xxhash64_base64(expected_hash);
         let progress = ProgressCapture::new();
 
         let result = validation
@@ -111,12 +96,12 @@ mod file_validation_tests {
     }
 
     #[tokio::test]
-    async fn test_file_validation_crc32_failure() {
+    async fn test_file_validation_xxhash64_failure() {
         let test_data = b"Hello, World!";
-        let wrong_crc32 = 0x12345678; // Definitely wrong
+        let wrong_hash = "AAAAAAAAAA8="; // Intentionally wrong base64 xxhash64
         let (_temp_dir, file_path) = create_test_file(test_data).await;
 
-        let validation = FileValidation::new().with_crc32(wrong_crc32);
+        let validation = FileValidation::new().with_xxhash64_base64(wrong_hash);
 
         let result = validation.validate_file(&file_path, None).await;
 
@@ -125,12 +110,12 @@ mod file_validation_tests {
     }
 
     #[tokio::test]
-    async fn test_file_validation_md5_success() {
+    async fn test_file_validation_with_size_success() {
         let test_data = b"Hello, World!";
-        let expected_md5 = calculate_md5(test_data);
+        let expected_size = test_data.len() as u64;
         let (_temp_dir, file_path) = create_test_file(test_data).await;
 
-        let validation = FileValidation::new().with_md5(expected_md5);
+        let validation = FileValidation::new().with_expected_size(expected_size);
 
         let result = validation.validate_file(&file_path, None).await;
 
@@ -138,33 +123,6 @@ mod file_validation_tests {
         assert!(result.unwrap());
     }
 
-    #[tokio::test]
-    async fn test_file_validation_md5_failure() {
-        let test_data = b"Hello, World!";
-        let wrong_md5 = "wrong_hash".to_string();
-        let (_temp_dir, file_path) = create_test_file(test_data).await;
-
-        let validation = FileValidation::new().with_md5(wrong_md5);
-
-        let result = validation.validate_file(&file_path, None).await;
-
-        assert!(result.is_ok());
-        assert!(!result.unwrap()); // Validation should fail
-    }
-
-    #[tokio::test]
-    async fn test_file_validation_sha256_success() {
-        let test_data = b"Hello, World!";
-        let expected_sha256 = calculate_sha256(test_data);
-        let (_temp_dir, file_path) = create_test_file(test_data).await;
-
-        let validation = FileValidation::new().with_sha256(expected_sha256);
-
-        let result = validation.validate_file(&file_path, None).await;
-
-        assert!(result.is_ok());
-        assert!(result.unwrap());
-    }
 
     #[tokio::test]
     async fn test_file_validation_size_success() {
@@ -203,17 +161,13 @@ mod file_validation_tests {
     #[tokio::test]
     async fn test_file_validation_multiple_hashes_success() {
         let test_data = b"Hello, World!";
-        let expected_crc32 = calculate_crc32(test_data);
-        let expected_md5 = calculate_md5(test_data);
-        let expected_sha256 = calculate_sha256(test_data);
+        let expected_xxhash64_base64 = calculate_xxhash64_base64(test_data);
         let expected_size = test_data.len() as u64;
 
         let (_temp_dir, file_path) = create_test_file(test_data).await;
 
         let validation = FileValidation::new()
-            .with_crc32(expected_crc32)
-            .with_md5(expected_md5)
-            .with_sha256(expected_sha256)
+            .with_xxhash64_base64(expected_xxhash64_base64)
             .with_expected_size(expected_size);
 
         let result = validation.validate_file(&file_path, None).await;
@@ -224,7 +178,7 @@ mod file_validation_tests {
 
     #[tokio::test]
     async fn test_file_validation_nonexistent_file() {
-        let validation = FileValidation::new().with_crc32(0x12345678);
+        let validation = FileValidation::new().with_xxhash64_base64("AAAAAAAAAA8=".to_string());
         let fake_path = PathBuf::from("nonexistent_file.txt");
 
         let result = validation.validate_file(&fake_path, None).await;
@@ -266,11 +220,11 @@ mod download_request_tests {
 
     #[test]
     fn test_download_request_with_validation() {
-        let validation = FileValidation::new().with_crc32(0x12345678);
+        let validation = FileValidation::new().with_xxhash64_base64("dGVzdA==".to_string());
         let request = DownloadRequest::new_http("https://example.com/file.txt", "/tmp")
             .with_validation(validation.clone());
 
-        assert_eq!(request.validation.crc32, validation.crc32);
+        assert_eq!(request.validation.xxhash64_base64, validation.xxhash64_base64);
     }
 
     #[test]
@@ -427,7 +381,7 @@ mod http_downloader_tests {
         let url = format!("{}/test-file.txt", mock_server.uri());
 
         // Use wrong CRC32 to force validation failure
-        let validation = FileValidation::new().with_crc32(0x12345678);
+        let validation = FileValidation::new().with_xxhash64_base64("AAAAAAAAAA8=".to_string());
         let request = DownloadRequest::new_http(url, temp_dir.path())
             .with_filename("test-file.txt")
             .with_validation(validation);
@@ -686,8 +640,7 @@ mod integration_tests {
     #[tokio::test]
     async fn test_end_to_end_download_with_validation() {
         let test_content = b"Integration test content for validation";
-        let expected_crc32 = calculate_crc32(test_content);
-        let expected_md5 = calculate_md5(test_content);
+        let expected_xxhash64_base64 = calculate_xxhash64_base64(test_content);
         let expected_size = test_content.len() as u64;
 
         let (_mock_server, url) = {
@@ -718,8 +671,7 @@ mod integration_tests {
         let temp_dir = tempdir().unwrap();
 
         let validation = FileValidation::new()
-            .with_crc32(expected_crc32)
-            .with_md5(expected_md5)
+            .with_xxhash64_base64(expected_xxhash64_base64)
             .with_expected_size(expected_size);
 
         let request = DownloadRequest::new_http(url, temp_dir.path())
@@ -786,7 +738,7 @@ mod enhanced_error_tests {
         let file_path = PathBuf::from("/test/file.txt");
         let validation_error = DownloadError::ValidationFailed {
             file: file_path.clone(),
-            validation_type: ValidationType::Md5,
+            validation_type: ValidationType::XxHash64,
             expected: "abc123".to_string(),
             actual: "def456".to_string(),
             suggestion: "Re-download the file as it may be corrupted".to_string(),
@@ -1109,7 +1061,7 @@ mod enhanced_integration_tests {
     async fn test_complete_download_workflow_with_enhanced_features() {
         let mock_server = setup_mock_server().await;
         let test_content = b"Integration test content with enhanced features!";
-        let expected_crc32 = calculate_crc32(test_content);
+        let expected_xxhash64_base64 = calculate_xxhash64_base64(test_content);
 
         // Set up mock responses
         Mock::given(method("HEAD"))
@@ -1142,7 +1094,7 @@ mod enhanced_integration_tests {
         let url = format!("{}/enhanced-test.txt", mock_server.uri());
 
         // Create request with validation
-        let validation = FileValidation::new().with_crc32(expected_crc32);
+        let validation = FileValidation::new().with_xxhash64_base64(expected_xxhash64_base64);
         let request = DownloadRequest::new_http(url, temp_dir.path())
             .with_filename("enhanced-test.txt")
             .with_validation(validation);

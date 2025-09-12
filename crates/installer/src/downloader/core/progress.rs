@@ -24,6 +24,7 @@ pub enum ProgressEvent {
     },
     ValidationStarted {
         file: String,
+        validation: crate::downloader::core::validation::FileValidation,
     },
     ValidationProgress {
         file: String,
@@ -49,7 +50,7 @@ pub trait ProgressReporter: Send + Sync {
     fn on_download_started(&self, _url: &str, _total_size: Option<u64>) {}
     fn on_download_progress(&self, _url: &str, _downloaded: u64, _total: Option<u64>, _speed_bps: f64) {}
     fn on_download_complete(&self, _url: &str, _final_size: u64) {}
-    fn on_validation_started(&self, _file: &str) {}
+    fn on_validation_started(&self, _file: &str, _validation: &crate::downloader::core::validation::FileValidation) {}
     fn on_validation_progress(&self, _file: &str, _progress: f64) {}
     fn on_validation_complete(&self, _file: &str, _valid: bool) {}
     fn on_retry_attempt(&self, _url: &str, _attempt: usize, _max_attempts: usize) {}
@@ -73,8 +74,8 @@ impl<T: ProgressReporter + 'static> IntoProgressCallback for T {
             ProgressEvent::DownloadComplete { url, final_size } => {
                 self.on_download_complete(&url, final_size);
             }
-            ProgressEvent::ValidationStarted { file } => {
-                self.on_validation_started(&file);
+            ProgressEvent::ValidationStarted { file, validation } => {
+                self.on_validation_started(&file, &validation);
             }
             ProgressEvent::ValidationProgress { file, progress } => {
                 self.on_validation_progress(&file, progress);
@@ -135,9 +136,14 @@ impl ProgressReporter for ConsoleProgressReporter {
         println!("✅ Download complete: {} ({} bytes)", url, final_size);
     }
 
-    fn on_validation_started(&self, file: &str) {
+    fn on_validation_started(&self, file: &str, validation: &crate::downloader::core::validation::FileValidation) {
         if self.verbose {
-            println!("🔍 Validating: {}", file);
+            let mut algos = Vec::new();
+            if validation.xxhash64_base64.is_some() { algos.push("XXHASH64"); }
+            if validation.expected_size.is_some() { algos.push("SIZE"); }
+
+            let algo_str = if algos.is_empty() { "NONE".to_string() } else { algos.join("+") };
+            println!("🔍 Validating {}: {}", algo_str, file);
         }
     }
 
@@ -212,9 +218,9 @@ impl ProgressReporter for CompositeProgressReporter {
         }
     }
 
-    fn on_validation_started(&self, file: &str) {
+    fn on_validation_started(&self, file: &str, validation: &crate::downloader::core::validation::FileValidation) {
         for reporter in &self.reporters {
-            reporter.on_validation_started(file);
+            reporter.on_validation_started(file, validation);
         }
     }
 

@@ -2056,18 +2056,14 @@ dependencies = [
  "anyhow",
  "async-trait",
  "base64 0.21.7",
- "crc32fast",
- "digest",
  "flate2",
  "futures",
  "hex",
- "md5",
  "once_cell",
  "rayon",
  "reqwest",
  "serde",
  "serde_json",
- "sha2",
  "tempfile",
  "thiserror 2.0.16",
  "tokio",
@@ -2079,6 +2075,7 @@ dependencies = [
  "url",
  "winreg 0.52.0",
  "wiremock",
+ "xxhash-rust",
 ]
 
 [[package]]
@@ -2369,12 +2366,6 @@ name = "matches"
 version = "0.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2532096657941c2fea9c289d370a250971c689d4f143798ff67113ec042024a5"
-
-[[package]]
-name = "md5"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "490cc448043f947bae3cbee9c203358d62dbee0db12107a74be5c30ccfd09771"
 
 [[package]]
 name = "memchr"
@@ -5956,6 +5947,12 @@ dependencies = [
  "once_cell",
  "pkg-config",
 ]
+
+[[package]]
+name = "xxhash-rust"
+version = "0.8.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fdd20c5420375476fbd4394763288da7eb0cc0b8c11deed431a91562af7335d3"
 
 [[package]]
 name = "yoke"

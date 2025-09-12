@@ -5,7 +5,20 @@
 
 use crate::parse_wabbajack::operations::{DownloadOperation, ArchiveManifest};
 use crate::downloader::core::{DownloadRequest, FileValidation};
+use base64;
 use std::path::PathBuf;
+
+/// Validate that a hash is in base64 format for xxHash64
+///
+/// Wabbajack uses base64-encoded xxHash64 hashes. This function validates the format.
+fn validate_xxhash64_base64(hash: &str) -> bool {
+    // Check if this looks like Base64 and can be decoded to 8 bytes (xxHash64)
+    if let Ok(decoded_bytes) = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, hash) {
+        decoded_bytes.len() == 8  // xxHash64 is 8 bytes
+    } else {
+        false
+    }
+}
 
 /// Convert a DownloadOperation to a DownloadRequest
 ///
@@ -24,24 +37,29 @@ pub fn operation_to_download_request(
     // Create validation requirements based on operation metadata
     let mut validation = FileValidation::new();
 
-    // Add hash validation if we have a hash
+    // Add hash validation if we have a hash - only xxHash64 supported
     if !operation.expected_hash.is_empty() {
-        validation = match operation.hash_algorithm.to_uppercase().as_str() {
-            "MD5" => validation.with_md5(operation.expected_hash.clone()),
-            "SHA256" => validation.with_sha256(operation.expected_hash.clone()),
-            "CRC32" => {
-                // Try to parse as hex, fallback to parsing as decimal
-                let crc32_value = u32::from_str_radix(&operation.expected_hash, 16)
-                    .or_else(|_| operation.expected_hash.parse::<u32>())
-                    .unwrap_or(0);
-                validation.with_crc32(crc32_value)
-            },
-            _ => {
-                // Unknown hash algorithm, just use size validation
-                validation
+        tracing::debug!("Setting up validation for {}: algorithm={}, hash={} (length={})",
+                        operation.filename, operation.hash_algorithm, operation.expected_hash, operation.expected_hash.len());
+
+        // Only support xxHash64 - all other algorithms are rejected
+        if operation.hash_algorithm.to_uppercase() != "XXHASH64" {
+            tracing::warn!("Unsupported hash algorithm '{}' for {}. Only xxHash64 is supported. Using size validation only.",
+                           operation.hash_algorithm, operation.filename);
+        } else {
+            // Validate that the hash is in proper base64 format for xxHash64
+            if validate_xxhash64_base64(&operation.expected_hash) {
+                validation = validation.with_xxhash64_base64(operation.expected_hash.clone());
+                tracing::debug!("Added xxHash64 validation for {}: {}", operation.filename, operation.expected_hash);
+            } else {
+                tracing::warn!("Invalid base64 xxHash64 hash format for {}: {}. Using size validation only.",
+                               operation.filename, operation.expected_hash);
             }
-        };
+        }
     }
+
+    // Add size validation
+    validation = validation.with_expected_size(operation.expected_size);
 
     // Create a download request from the source
     let downloadable_source: Box<dyn crate::downloader::core::Downloadable> = match &operation.source {

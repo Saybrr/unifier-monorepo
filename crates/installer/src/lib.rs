@@ -25,7 +25,7 @@
 //!
 //! // Set up file validation (optional)
 //! let validation = FileValidation::new()
-//!     .with_crc32(0x12345678)
+//!     .with_xxhash64_base64("ejsZTQOI370=")  // Base64 xxHash64 hash
 //!     .with_expected_size(1024);
 //!
 //! // Create a download request
