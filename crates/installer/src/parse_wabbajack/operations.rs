@@ -101,18 +101,14 @@ impl DownloadOperation {
             source,
             filename: filename.into(),
             expected_hash: expected_hash.into(),
-            hash_algorithm: "SHA256".to_string(), // Default to SHA256
+            hash_algorithm: "XXHASH64".to_string(),
             expected_size,
             priority: 0,
             metadata: OperationMetadata::default(),
         }
     }
 
-    /// Set the hash algorithm and return self for chaining
-    pub fn with_hash_algorithm<S: Into<String>>(mut self, algorithm: S) -> Self {
-        self.hash_algorithm = algorithm.into();
-        self
-    }
+
 
     /// Set the priority and return self for chaining
     pub fn with_priority(mut self, priority: u32) -> Self {

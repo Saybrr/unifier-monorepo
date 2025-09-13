@@ -1,32 +1,4 @@
-//! Modular file downloader with validation and retry capabilities
-//!
-//! This module provides a comprehensive file downloading system with:
-//! - Multiple download source support (HTTP, Google Drive, etc.)
-//! - File integrity validation (CRC32, MD5, SHA256)
-//! - Retry logic with exponential backoff
-//! - Progress tracking
-//! - Resume capability
-//!
-//! # Module Organization
-//!
-//! The module is organized to reflect the call chain clearly:
-//!
-//! ```text
-//! User Code
-//! ↓
-//! EnhancedDownloader (lib.rs)
-//! ↓
-//! Batch operations (batch/)
-//! ↓
-//! DownloaderRegistry (registry.rs)
-//! ↓
-//! Backend implementations (backends/)
-//! ↓
-//! Core types (core/)
-//! ```
-//!
-//! This organization makes it easy to understand how data flows through the system
-//! and where to find specific functionality.
+
 
 // Module declarations following the hierarchy
 pub mod config;

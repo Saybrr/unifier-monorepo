@@ -32,7 +32,7 @@ use std::sync::Arc;
 /// - Mirror URL fallback support
 pub struct EnhancedDownloader {
     config: DownloadConfig,
-    validation_pool: ValidationPool,
+    _validation_pool: ValidationPool,
     metrics: Arc<DownloadMetrics>,
 }
 
@@ -42,7 +42,7 @@ impl EnhancedDownloader {
         let validation_pool = ValidationPool::new(config.max_concurrent_validations);
         let metrics = Arc::new(DownloadMetrics::default());
 
-        Self { config, validation_pool, metrics }
+        Self { config, _validation_pool: validation_pool, metrics }
     }
 
     /// Get access to built-in performance metrics

@@ -5,6 +5,11 @@
 
 use crate::parse_wabbajack::operations::{DownloadOperation, ArchiveManifest};
 use crate::downloader::core::{DownloadRequest, FileValidation};
+
+// Import download source implementations so trait impls are available
+#[allow(unused_imports)]
+use crate::download::sources::{http, wabbajack_cdn, gamefile, nexus, manual, archive};
+
 use base64;
 use std::path::PathBuf;
 
@@ -31,35 +36,16 @@ pub fn operation_to_download_request(
 ) -> DownloadRequest {
     let destination = base_destination.join(&operation.filename);
     let parent_dir = destination.parent()
-        .unwrap_or(base_destination)
-        .to_path_buf();
+    .unwrap_or(base_destination)
+    .to_path_buf();
+
+
+    tracing::debug!("Setting up validation for {}: algorithm={}, hash={} (length={})",
+    operation.filename, operation.hash_algorithm, operation.expected_hash, operation.expected_hash.len());
+
 
     // Create validation requirements based on operation metadata
-    let mut validation = FileValidation::new();
-
-    // Add hash validation if we have a hash - only xxHash64 supported
-    if !operation.expected_hash.is_empty() {
-        tracing::debug!("Setting up validation for {}: algorithm={}, hash={} (length={})",
-                        operation.filename, operation.hash_algorithm, operation.expected_hash, operation.expected_hash.len());
-
-        // Only support xxHash64 - all other algorithms are rejected
-        if operation.hash_algorithm.to_uppercase() != "XXHASH64" {
-            tracing::warn!("Unsupported hash algorithm '{}' for {}. Only xxHash64 is supported. Using size validation only.",
-                           operation.hash_algorithm, operation.filename);
-        } else {
-            // Validate that the hash is in proper base64 format for xxHash64
-            if validate_xxhash64_base64(&operation.expected_hash) {
-                validation = validation.with_xxhash64_base64(operation.expected_hash.clone());
-                tracing::debug!("Added xxHash64 validation for {}: {}", operation.filename, operation.expected_hash);
-            } else {
-                tracing::warn!("Invalid base64 xxHash64 hash format for {}: {}. Using size validation only.",
-                               operation.filename, operation.expected_hash);
-            }
-        }
-    }
-
-    // Add size validation
-    validation = validation.with_expected_size(operation.expected_size);
+    let validation = FileValidation::new(operation.expected_hash.clone(), operation.expected_size);
 
     // Create a download request from the source
     let downloadable_source: Box<dyn crate::downloader::core::Downloadable> = match &operation.source {
@@ -80,6 +66,9 @@ pub fn operation_to_download_request(
         },
         crate::parse_wabbajack::sources::DownloadSource::Archive(archive_source) => {
             Box::new(archive_source.clone())
+        },
+        crate::parse_wabbajack::sources::DownloadSource::Unknown(unknown_source) => {
+            Box::new(unknown_source.clone())
         },
     };
 
@@ -104,42 +93,13 @@ pub fn operations_to_download_requests(
         .collect()
 }
 
-/// Convert an entire ArchiveManifest to DownloadRequests
-///
-/// This function processes a complete modlist manifest and returns
-/// download requests for all automatic operations (filtering out manual ones by default).
-pub fn manifest_to_download_requests(
-    manifest: &ArchiveManifest,
-    base_destination: &PathBuf,
-    include_manual: bool,
-) -> Vec<DownloadRequest> {
-    operations_to_download_requests(&manifest.operations, base_destination, include_manual)
-}
-
-/// Get download requests sorted by priority
-///
-/// This function converts operations to download requests and sorts them
-/// by priority (lower number = higher priority).
-pub fn manifest_to_prioritized_download_requests(
-    manifest: &ArchiveManifest,
-    base_destination: &PathBuf,
-    include_manual: bool,
-) -> Vec<DownloadRequest> {
-    let mut operations: Vec<_> = manifest.operations.iter().collect();
-    operations.sort_by_key(|op| op.priority);
-
-    operations.iter()
-        .filter(|op| include_manual || !op.requires_user_interaction())
-        .map(|op| operation_to_download_request(op, base_destination))
-        .collect()
-}
 
 /// Statistics about conversion from manifest to download requests
 #[derive(Debug, Default)]
 pub struct ConversionStats {
     pub total_operations: usize,
     pub converted_requests: usize,
-    pub skipped_manual: usize,
+    pub skipped: usize,
     pub total_download_size: u64,
     pub operations_by_source: std::collections::HashMap<String, usize>,
 }
@@ -164,13 +124,13 @@ pub fn manifest_to_download_requests_with_stats(
             crate::parse_wabbajack::sources::DownloadSource::Manual(_) => "Manual",
             crate::parse_wabbajack::sources::DownloadSource::Archive(_) => "Archive",
             crate::parse_wabbajack::sources::DownloadSource::WabbajackCDN(_) => "WabbajackCDN",
+            crate::parse_wabbajack::sources::DownloadSource::Unknown(_) => "Unknown",
         };
-
         *stats.operations_by_source.entry(source_type.to_string()).or_insert(0) += 1;
 
         // Skip manual operations if not including them
-        if !include_manual && operation.requires_user_interaction() {
-            stats.skipped_manual += 1;
+        if matches!(operation.source, crate::parse_wabbajack::sources::DownloadSource::Unknown(_)) {
+            stats.skipped += 1;
             continue;
         }
 
@@ -203,7 +163,7 @@ mod tests {
             "abcd1234",
             1024, // Test file size
         )
-        .with_hash_algorithm("SHA256");
+        .with_hash_algorithm("XXHASH64");
 
         let base_destination = PathBuf::from("/downloads");
         let request = operation_to_download_request(&operation, &base_destination);

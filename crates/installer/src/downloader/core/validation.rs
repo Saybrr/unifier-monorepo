@@ -58,31 +58,16 @@ pub struct FileValidation {
     pub expected_size: Option<u64>,
 }
 
-impl Default for FileValidation {
-    fn default() -> Self {
-        Self {
-            xxhash64_base64: None,
-            expected_size: None,
-        }
-    }
-}
+
 
 impl FileValidation {
-    pub fn new() -> Self {
-        Self::default()
-    }
+    pub fn new(hash: String, size: u64) -> Self {
+        Self {
+            xxhash64_base64: Some(hash),
+            expected_size: Some(size),
+        }
 
-    /// Set the expected xxHash64 in base64 format (matching Wabbajack format)
-    pub fn with_xxhash64_base64<S: Into<String>>(mut self, hash: S) -> Self {
-        self.xxhash64_base64 = Some(hash.into());
-        self
     }
-
-    pub fn with_expected_size(mut self, size: u64) -> Self {
-        self.expected_size = Some(size);
-        self
-    }
-
     /// Check if validation is needed
     pub fn is_empty(&self) -> bool {
         self.xxhash64_base64.is_none() && self.expected_size.is_none()
