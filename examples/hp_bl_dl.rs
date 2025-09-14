@@ -7,7 +7,6 @@
 //! 5. Built-in error handling and statistics
 
 use installer::*;
-use std::path::PathBuf;
 
 #[tokio::main]
 async fn main() -> Result<()> {

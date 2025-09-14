@@ -47,22 +47,20 @@ pub struct RawArchive {
     pub state: RawDownloaderState,
 }
 
-/// Raw downloader state from JSON (untagged union)
+/// Raw downloader state from JSON (tag-based deserialization using $type field)
 #[derive(Debug, Deserialize, Clone)]
-#[serde(untagged)]
+#[serde(tag = "$type")]
 pub enum RawDownloaderState {
+    #[serde(rename = "HttpDownloader, Wabbajack.Lib")]
     Http {
-        #[serde(rename = "$type")]
-        type_name: String,
         #[serde(rename = "Url")]
         url: String,
         #[serde(rename = "Headers", default)]
         headers: Vec<String>,
     },
 
+    #[serde(rename = "NexusDownloader, Wabbajack.Lib")]
     Nexus {
-        #[serde(rename = "$type")]
-        type_name: String,
         #[serde(rename = "ModID")]
         mod_id: u32,
         #[serde(rename = "FileID")]
@@ -83,9 +81,8 @@ pub enum RawDownloaderState {
         image_url: Option<String>,
     },
 
+    #[serde(rename = "GameFileSourceDownloader, Wabbajack.Lib")]
     GameFile {
-        #[serde(rename = "$type")]
-        type_name: String,
         #[serde(rename = "Game")]
         game: String,
         #[serde(rename = "GameFile")]
@@ -96,15 +93,15 @@ pub enum RawDownloaderState {
         hash: String,
     },
 
+    #[serde(rename = "WabbajackCDNDownloader+State, Wabbajack.Lib")]
     WabbajackCDN {
-        #[serde(rename = "$type")]
-        type_name: String,
         #[serde(rename = "Url")]
         url: String,
     },
 
     // Handle unknown downloader types gracefully
-    Unknown(serde_json::Value),
+    #[serde(other)]
+    Unknown,
 }
 
 /// Parser for Wabbajack modlists
@@ -195,7 +192,7 @@ impl ModlistParser {
         meta: &str
     ) -> Result<DownloadSource, ParseError> {
         match state {
-            RawDownloaderState::Http { url, headers, .. } => {
+            RawDownloaderState::Http { url, headers } => {
                 let mut http_source = HttpSource::new(url);
 
                 // Parse headers if any (they come as "Key: Value" strings)
@@ -232,20 +229,14 @@ impl ModlistParser {
                 Ok(DownloadSource::GameFile(gamefile_source))
             },
 
-            RawDownloaderState::WabbajackCDN { url, .. } => {
+            RawDownloaderState::WabbajackCDN { url } => {
                 let wabbajack_cdn_source = WabbajackCDNSource::new(url);
                 Ok(DownloadSource::WabbajackCDN(wabbajack_cdn_source))
             },
 
-            RawDownloaderState::Unknown(value) => {
-                // Extract the $type field from the raw JSON value
-                let type_name = value.get("$type")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("Unknown")
-                    .to_string();
-
+            RawDownloaderState::Unknown => {
                 let unknown_source = UnknownSource::new(
-                    type_name,
+                    "Unknown Downloader Type".to_string(),
                     Some(archive_name.to_string()),
                     Some(meta.to_string()),
                 );
@@ -430,7 +421,7 @@ mod tests {
 
         let operation = &manifest.requests[0];
         if let DownloadSource::Unknown(unknown_source) = &operation.source {
-            assert_eq!(unknown_source.source_type, "SomeNewDownloader, Custom.Lib");
+            assert_eq!(unknown_source.source_type, "Unknown Downloader Type");
             assert_eq!(unknown_source.archive_name, Some("unknown-downloader.zip".to_string()));
             assert_eq!(unknown_source.meta, Some("[General]\ngameName=skyrimse\nmodID=71371\nfileID=575985".to_string()));
         } else {

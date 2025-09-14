@@ -1,7 +1,7 @@
 //! Nexus Mods download source implementation
 
 use crate::downloader::core::{
-    DownloadRequest, DownloadResult, ProgressCallback, Result, DownloadError
+    DownloadRequest, DownloadResult, ProgressCallback, Result,
 };
 
 /// Nexus Mods download source
