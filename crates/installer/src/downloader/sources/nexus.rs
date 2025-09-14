@@ -43,7 +43,7 @@ pub async fn initialize_nexus_api() -> Result<()> {
 }
 
 /// Get the global Nexus authentication client
-fn get_nexus_api() -> Result<&'static NexusAPI> {
+pub fn get_nexus_api() -> Result<&'static NexusAPI> {
     NEXUS_API.get().ok_or_else(||
         DownloadError::Configuration {
             message: "Nexus authentication not initialized".to_string(),
@@ -114,7 +114,7 @@ impl NexusSource {
         let download_link = api.select_best_download_link(&download_links)
             .ok_or_else(|| DownloadError::Legacy("No suitable download link found".to_string()))?;
 
-        info!("Using CDN: {} for mod {} file {}",
+        debug!("Using CDN: {} for mod {} file {}",
               download_link.name, self.mod_id, self.file_id);
 
         // Create destination directory if it doesn't exist

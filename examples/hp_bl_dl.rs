@@ -5,8 +5,10 @@
 //! 3. Multi-file progress dashboard (built-in!)
 //! 4. Automatic filtering of unsupported downloads
 //! 5. Built-in error handling and statistics
+//! 6. Periodic Nexus API rate limit monitoring during downloads
 
 use installer::*;
+use std::time::Duration;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -23,7 +25,9 @@ async fn main() -> Result<()> {
     "Baseline/modlist",
     "./downloads",
     ModlistOptions::default(),
-    Some(DashboardProgressReporter::new().into_callback())
+    Some(NexusRateLimitProgressReporter::new()
+        .with_rate_limit_interval(Duration::from_secs(10))
+        .into_callback())
     );
     let result = downloader.download().await?;
 

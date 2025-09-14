@@ -127,7 +127,7 @@ pub use integrations::{
     ModlistDownloader, ModlistOptions, ModlistDownloadResult,
 
     // Built-in progress reporters
-    DashboardProgressReporter, DashboardStyle,
+    DashboardProgressReporter, DashboardStyle, NexusRateLimitProgressReporter,
 
     // Extension traits for better ergonomics
     DownloadRequestExt, DownloadRequestIteratorExt, DownloadRequestVecExt, RequestSummaryStats,
