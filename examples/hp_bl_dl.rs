@@ -15,8 +15,6 @@ async fn main() -> Result<()> {
         .with_max_level(tracing::Level::INFO)
         .init();
 
-    println!("🚀 High-Performance Baseline Download with Hash Validation");
-    println!("✨ NEW SIMPLIFIED API - 551 lines → 70 lines!");
 
     // Test debug logging
     tracing::debug!("DEBUG LOGGING IS ENABLED - you should see this message");

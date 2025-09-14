@@ -106,6 +106,9 @@ pub use downloader::{
 
     // Error handling
     DownloadError, Result, ErrorSeverity, FileOperation, ValidationType, ErrorContext,
+
+    // Nexus authentication
+    NexusAPI, UserValidation, initialize_nexus_api,
 };
 
 // Re-export parse_wabbajack types

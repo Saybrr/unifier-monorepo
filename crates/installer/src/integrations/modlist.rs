@@ -102,7 +102,13 @@ impl ModlistDownloader {
         // Get requests directly from manifest - no conversion needed!
         let download_requests = manifest.requests;
 
-
+        // Check if any download request is a NexusSource, and initialize Nexus API if needed
+        let needs_nexus = download_requests.iter().any(|req| {
+            matches!(&req.source, crate::parse_wabbajack::DownloadSource::Nexus(_))
+        });
+        if needs_nexus {
+            crate::initialize_nexus_api().await?;
+        }
         // Create downloader with appropriate configuration
         let downloader = Downloader::new(DownloadConfig::default());
 

@@ -7,6 +7,7 @@ pub mod core;
 pub mod config;
 pub mod batch;
 pub mod sources;
+pub mod api;
 pub mod r#lib;
 
 // Re-export main types for convenience
@@ -26,6 +27,10 @@ pub use sources::{
     DownloadSource, HttpSource, NexusSource, GameFileSource, ManualSource,
     ArchiveSource, WabbajackCDNSource, UnknownSource
 };
+
+// Re-export auth types and functions
+pub use api::{NexusAPI, UserValidation, NexusMod, NexusFile, NexusDownloadLink};
+pub use sources::nexus::initialize_nexus_api;
 
 #[cfg(test)]
 mod tests;

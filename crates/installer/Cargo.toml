@@ -54,6 +54,9 @@ hex = "0.4"
 # Base64 encoding/decoding
 base64 = "0.21"
 
+# Environment variable loading
+dotenv = "0.15"
+
 # Windows registry (Windows only)
 [target.'cfg(windows)'.dependencies]
 winreg = "0.52"
@@ -63,6 +66,7 @@ tokio = { version = "1.0", features = ["full"] }
 tokio-test = "0.4"
 wiremock = "0.6"
 tracing-subscriber = "0.3"
+http = "0.2"
 
 [[example]]
 name = "structured_download_example"
@@ -92,3 +96,7 @@ path = "../../examples/simple_baseline_download.rs"
 name = "hp_bl_dl"
 path = "../../examples/hp_bl_dl.rs"
 
+
+[[example]]
+name = "nexus_dl"
+path = "../../examples/nexus_dl.rs"
