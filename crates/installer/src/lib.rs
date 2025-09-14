@@ -112,17 +112,11 @@ pub use downloader::{
 // Re-export parse_wabbajack types
 pub use parse_wabbajack::{
     // Core parsing types
-    DownloadOperation, ArchiveManifest, OperationMetadata, ManifestMetadata,
-    parse_modlist, ModlistParser,
+    ArchiveManifest, ManifestMetadata, parse_modlist, ModlistParser,
 
     // Source types
     DownloadSource as WabbajackDownloadSource, HttpSource, NexusSource,
     GameFileSource, ManualSource, ArchiveSource,
-
-    // Integration functions
-    operation_to_download_request, operations_to_download_requests,
-    manifest_to_download_requests, manifest_to_prioritized_download_requests,
-    manifest_to_download_requests_with_stats, ConversionStats,
 };
 
 // Re-export high-level convenience APIs (the main improvement!)

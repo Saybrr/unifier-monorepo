@@ -1,6 +1,5 @@
 //! HTTP download source implementation
 
-use async_trait::async_trait;
 use futures::StreamExt;
 use reqwest::Client;
 use std::path::Path;
@@ -9,14 +8,13 @@ use tokio::io::AsyncWriteExt;
 use tracing::{debug, warn};
 
 use crate::downloader::core::{
-    Downloadable, DownloadRequest, DownloadResult, ProgressCallback, Result,
+    DownloadRequest, DownloadResult, ProgressCallback, Result,
     DownloadError, ValidationType, ProgressEvent
 };
 use crate::parse_wabbajack::sources::HttpSource;
 
-#[async_trait]
-impl Downloadable for HttpSource {
-    async fn download(
+impl HttpSource {
+    pub async fn download(
         &self,
         request: &DownloadRequest,
         progress_callback: Option<ProgressCallback>,
@@ -32,7 +30,7 @@ impl Downloadable for HttpSource {
             return Ok(result);
         }
 
-        let size = self.download_helper(&self.url, &dest_path, progress_callback.clone(), request.expected_size, config).await?;
+        let size = self.download_helper(&self.url, &dest_path, progress_callback.clone(), Some(request.expected_size), config).await?;
 
         // Validate the downloaded file (only if validation is specified)
         if !request.validation.is_empty() {
@@ -66,13 +64,6 @@ impl Downloadable for HttpSource {
         Ok(DownloadResult::Downloaded { size })
     }
 
-    fn supports_resume(&self) -> bool {
-        true
-    }
-
-    fn description(&self) -> String {
-        format!("HTTP download from {}", self.url)
-    }
 }
 
 impl HttpSource {

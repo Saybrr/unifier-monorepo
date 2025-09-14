@@ -1,6 +1,5 @@
 //! WabbajackCDN download source implementation
 
-use async_trait::async_trait;
 use flate2::read::GzDecoder;
 use reqwest::Client;
 use serde::Deserialize;
@@ -12,7 +11,7 @@ use tracing::debug;
 use base64::{Engine as _, engine::general_purpose};
 
 use crate::downloader::core::{
-    Downloadable, DownloadRequest, DownloadResult, ProgressCallback, Result,
+    DownloadRequest, DownloadResult, ProgressCallback, Result,
     DownloadError, ValidationType, ProgressEvent
 };
 use crate::parse_wabbajack::sources::WabbajackCDNSource;
@@ -42,9 +41,8 @@ struct PartDefinition {
     offset: u64,
 }
 
-#[async_trait]
-impl Downloadable for WabbajackCDNSource {
-    async fn download(
+impl WabbajackCDNSource {
+    pub async fn download(
         &self,
         request: &DownloadRequest,
         progress_callback: Option<ProgressCallback>,
@@ -66,7 +64,7 @@ impl Downloadable for WabbajackCDNSource {
         }
 
         // Download the chunked file
-        let final_size = self.download_chunked_file(&dest_path, progress_callback.clone(), request.expected_size).await?;
+        let final_size = self.download_chunked_file(&dest_path, progress_callback.clone(), Some(request.expected_size)).await?;
 
         // Validate the complete assembled file using custom WabbajackCDN validation
         self.validate_wabbajack_file(&dest_path, &request.validation, progress_callback).await?;
@@ -74,12 +72,7 @@ impl Downloadable for WabbajackCDNSource {
         Ok(DownloadResult::Downloaded { size: final_size })
     }
 
-    fn description(&self) -> String {
-        format!("WabbajackCDN download from {}", self.url)
-    }
-}
-
-impl WabbajackCDNSource {
+    // Move helper methods to the same impl block
     /// Domain remapping for WabbajackCDN domains
     const DOMAIN_REMAPS: &'static [(&'static str, &'static str)] = &[
         ("wabbajack.b-cdn.net", "authored-files.wabbajack.org"),

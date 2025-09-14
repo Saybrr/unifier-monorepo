@@ -236,4 +236,13 @@ impl DownloadSource {
     pub fn requires_external_dependencies(&self) -> bool {
         matches!(self, DownloadSource::Nexus(_) | DownloadSource::GameFile(_))
     }
+
+    /// Check if this source supports resume functionality
+    pub fn supports_resume(&self) -> bool {
+        match self {
+            DownloadSource::Http(_) => true,
+            DownloadSource::WabbajackCDN(_) => true,
+            _ => false,
+        }
+    }
 }

@@ -37,16 +37,16 @@ impl DownloadRequestExt for DownloadRequest {
 
     fn is_likely_fast(&self) -> bool {
         // Files under 10MB are considered "fast"
-        self.expected_size.map(|size| size < 10 * 1024 * 1024).unwrap_or(false)
+        self.expected_size < 10 * 1024 * 1024
     }
 
     fn is_likely_slow(&self) -> bool {
         // Files over 100MB are considered "slow"
-        self.expected_size.map(|size| size > 100 * 1024 * 1024).unwrap_or(false)
+        self.expected_size > 100 * 1024 * 1024
     }
 
     fn expected_size_mb(&self) -> Option<f64> {
-        self.expected_size.map(|size| size as f64 / 1_048_576.0)
+        Some(self.expected_size as f64 / 1_048_576.0)
     }
 }
 
@@ -80,20 +80,20 @@ pub trait DownloadRequestIteratorExt: Iterator<Item = DownloadRequest> + Sized {
     /// Sort by expected file size (smallest first)
     fn sort_by_size_asc(self) -> impl Iterator<Item = DownloadRequest> {
         let mut requests: Vec<_> = self.collect();
-        requests.sort_by_key(|req| req.expected_size.unwrap_or(0));
+        requests.sort_by_key(|req| req.expected_size);
         requests.into_iter()
     }
 
     /// Sort by expected file size (largest first)
     fn sort_by_size_desc(self) -> impl Iterator<Item = DownloadRequest> {
         let mut requests: Vec<_> = self.collect();
-        requests.sort_by_key(|req| std::cmp::Reverse(req.expected_size.unwrap_or(0)));
+        requests.sort_by_key(|req| std::cmp::Reverse(req.expected_size));
         requests.into_iter()
     }
 
     /// Calculate total size in bytes for all requests
     fn total_size(&mut self) -> u64 {
-        self.map(|req| req.expected_size.unwrap_or(0)).sum()
+        self.map(|req| req.expected_size).sum()
     }
 
     /// Calculate total size in MB for all requests
@@ -131,9 +131,7 @@ impl DownloadRequestVecExt for Vec<DownloadRequest> {
                 external_deps += 1;
             }
 
-            if let Some(size) = request.expected_size {
-                total_size += size;
-            }
+            total_size += request.expected_size;
 
             if request.is_likely_fast() {
                 fast_count += 1;

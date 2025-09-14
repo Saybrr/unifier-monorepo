@@ -10,14 +10,8 @@
 pub mod sources;
 pub mod operations;
 pub mod parser;
-pub mod integration;
 
 // Re-export main types
 pub use sources::{DownloadSource, HttpSource, NexusSource, GameFileSource, ManualSource, ArchiveSource};
-pub use operations::{DownloadOperation, ArchiveManifest, OperationMetadata, ManifestMetadata};
+pub use operations::{ArchiveManifest, ManifestMetadata};
 pub use parser::{parse_modlist, ModlistParser};
-pub use integration::{
-    operation_to_download_request, operations_to_download_requests,
-    manifest_to_download_requests, manifest_to_prioritized_download_requests,
-    manifest_to_download_requests_with_stats, ConversionStats
-};

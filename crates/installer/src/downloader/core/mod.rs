@@ -13,73 +13,49 @@ pub use validation::{FileValidation, ValidationHandle, ValidationPool};
 pub use progress::{ProgressEvent, ProgressCallback, ProgressReporter, IntoProgressCallback, ConsoleProgressReporter, NullProgressReporter, CompositeProgressReporter};
 
 use std::path::PathBuf;
-use async_trait::async_trait;
 
 // Re-export the structured DownloadSource for convenience
 pub use crate::parse_wabbajack::sources::DownloadSource;
 
-/// Trait for types that can download files
-///
-/// This trait allows each download source type to implement its own download logic,
-/// eliminating the need for a central registry and making the code more modular.
-#[async_trait]
-pub trait Downloadable: Send + Sync {
-    /// Download the file to the specified destination
-    ///
-    /// # Arguments
-    /// * `request` - The download request containing destination, validation, etc.
-    /// * `progress_callback` - Optional progress reporting callback
-    /// * `config` - Download configuration (timeouts, user agent, etc.)
-    ///
-    /// # Returns
-    /// Result containing the download result with size information
-    async fn download(
-        &self,
-        request: &DownloadRequest,
-        progress_callback: Option<ProgressCallback>,
-        config: &crate::downloader::config::DownloadConfig,
-    ) -> Result<DownloadResult>;
+// Trait removed - using enum dispatch instead
 
-    /// Check if this source supports resume functionality
-    fn supports_resume(&self) -> bool {
-        false
-    }
-
-    /// Check if this source can validate using the provided validation method
-    fn can_validate(&self, _validation: &FileValidation) -> bool {
-        // By default, assume we can validate any method (only xxHash64 is supported)
-        true
-    }
-
-    /// Get a description of this download source for logging/UI
-    fn description(&self) -> String;
-
-    /// Check if this source requires user interaction (e.g., manual downloads)
-    fn requires_user_interaction(&self) -> bool {
-        false
-    }
-
-    /// Check if this source requires external dependencies (API keys, game installations, etc.)
-    fn requires_external_dependencies(&self) -> bool {
-        false
-    }
+/// Additional metadata for a download request
+#[derive(Debug, Clone, Default)]
+pub struct DownloadMetadata {
+    /// Human-readable description
+    pub description: String,
+    /// Category/group this download belongs to
+    pub category: String,
+    /// Whether this is required or optional
+    pub required: bool,
+    /// Tags for filtering/grouping
+    pub tags: Vec<String>,
 }
 
 /// A download request containing all necessary information
 ///
-/// This is the main data structure that flows through the entire download system.
-/// It uses downloadable trait objects for polymorphic downloading.
+/// This is the unified structure that combines parsing and downloading.
+/// It contains all data needed to download, validate, and organize files.
+/// It uses DownloadSource enum for compile-time dispatch.
 pub struct DownloadRequest {
-    /// The download source (trait object for polymorphic downloading)
-    pub source: Box<dyn Downloadable>,
+    /// The download source (enum for compile-time dispatch)
+    pub source: DownloadSource,
     /// Directory where the file should be saved
     pub destination: PathBuf,
-    /// Validation requirements for the downloaded file
+    /// Final filename for the downloaded file
+    pub filename: String,
+    /// Expected file hash for validation
+    pub expected_hash: String,
+    /// Hash algorithm used (e.g., "XXHASH64", "SHA256")
+    pub hash_algorithm: String,
+    /// Expected file size in bytes
+    pub expected_size: u64,
+    /// Validation requirements for the downloaded file (derived from hash/size)
     pub validation: FileValidation,
-    /// Optional override for the filename (defaults to extracting from source)
-    pub filename: Option<String>,
-    /// Expected file size in bytes (for progress reporting)
-    pub expected_size: Option<u64>,
+    /// Priority for download ordering (lower = higher priority)
+    pub priority: u32,
+    /// Optional metadata for display/logging purposes
+    pub metadata: DownloadMetadata,
 }
 
 impl std::fmt::Debug for DownloadRequest {
@@ -87,78 +63,93 @@ impl std::fmt::Debug for DownloadRequest {
         f.debug_struct("DownloadRequest")
             .field("source", &self.source.description())
             .field("destination", &self.destination)
-            .field("validation", &self.validation)
             .field("filename", &self.filename)
+            .field("expected_hash", &self.expected_hash)
             .field("expected_size", &self.expected_size)
+            .field("priority", &self.priority)
             .finish()
     }
 }
 
 impl DownloadRequest {
-    /// Create a new download request with HTTP URL and destination
-    pub fn new_http<S: Into<String>, P: Into<PathBuf>>(url: S, destination: P) -> Self {
+    /// Create a new download request with HTTP URL
+    pub fn new_http<S: Into<String>, P: Into<PathBuf>, F: Into<String>>(
+        url: S,
+        destination: P,
+        filename: F,
+        expected_size: u64,
+        expected_hash: String
+    ) -> Self {
         use crate::parse_wabbajack::sources::HttpSource;
+        let hash_copy = expected_hash.clone();
         Self {
-            source: Box::new(HttpSource::new(url)),
+            source: DownloadSource::Http(HttpSource::new(url)),
             destination: destination.into(),
-            validation: FileValidation::default(),
-            filename: None,
-            expected_size: None,
+            filename: filename.into(),
+            expected_hash,
+            hash_algorithm: "XXHASH64".to_string(),
+            expected_size,
+            validation: FileValidation::new(hash_copy, expected_size),
+            priority: 0,
+            metadata: DownloadMetadata::default(),
         }
     }
 
-    /// Create a new download request with any downloadable source
-    pub fn new<P: Into<PathBuf>>(source: Box<dyn Downloadable>, destination: P) -> Self {
+    /// Create a new download request with any download source
+    pub fn new<P: Into<PathBuf>, F: Into<String>>(
+        source: DownloadSource,
+        destination: P,
+        filename: F,
+        expected_size: u64,
+        expected_hash: String
+    ) -> Self {
+        let hash_copy = expected_hash.clone();
         Self {
             source,
             destination: destination.into(),
-            validation: FileValidation::default(),
-            filename: None,
-            expected_size: None,
+            filename: filename.into(),
+            expected_hash,
+            hash_algorithm: "XXHASH64".to_string(),
+            expected_size,
+            validation: FileValidation::new(hash_copy, expected_size),
+            priority: 0,
+            metadata: DownloadMetadata::default(),
         }
     }
 
-    /// Create a download request from a concrete source type
-    pub fn from_source<T: Downloadable + 'static, P: Into<PathBuf>>(source: T, destination: P) -> Self {
-        Self::new(Box::new(source), destination)
-    }
+    // Removed from_source method as it's no longer needed with enum dispatch
 
-    /// Set validation requirements
-    pub fn with_validation(mut self, validation: FileValidation) -> Self {
-        self.validation = validation;
+    /// Set the hash algorithm
+    pub fn with_hash_algorithm<S: Into<String>>(mut self, algorithm: S) -> Self {
+        self.hash_algorithm = algorithm.into();
         self
     }
 
-    /// Override the filename (otherwise extracted from source)
-    pub fn with_filename<S: Into<String>>(mut self, filename: S) -> Self {
-        self.filename = Some(filename.into());
+    /// Set the priority (lower = higher priority)
+    pub fn with_priority(mut self, priority: u32) -> Self {
+        self.priority = priority;
         self
     }
 
-    /// Set the expected file size for progress reporting
-    pub fn with_expected_size(mut self, size: u64) -> Self {
-        self.expected_size = Some(size);
+    /// Set metadata
+    pub fn with_metadata(mut self, metadata: DownloadMetadata) -> Self {
+        self.metadata = metadata;
         self
     }
 
     /// Get the filename for this download
-    ///
-    /// Returns the explicit filename if set, otherwise falls back to "downloaded_file".
-    /// With trait objects, filename extraction is more complex so we encourage
-    /// setting explicit filenames.
     pub fn get_filename(&self) -> Result<String> {
-        if let Some(ref filename) = self.filename {
-            return Ok(filename.clone());
-        }
-
-        // With trait objects, we can't easily extract filenames from URLs
-        // so we fall back to a generic name. Users should set explicit filenames.
-        Ok("downloaded_file".to_string())
+        Ok(self.filename.clone())
     }
 
     /// Get a description of the download source
     pub fn get_description(&self) -> String {
         self.source.description()
+    }
+
+    /// Check if this source supports resume functionality
+    pub fn supports_resume(&self) -> bool {
+        self.source.supports_resume()
     }
 
     /// Check if this download requires user interaction
@@ -169,11 +160,6 @@ impl DownloadRequest {
     /// Check if this download requires external dependencies
     pub fn requires_external_dependencies(&self) -> bool {
         self.source.requires_external_dependencies()
-    }
-
-    /// Check if this source supports resume functionality
-    pub fn supports_resume(&self) -> bool {
-        self.source.supports_resume()
     }
 }
 

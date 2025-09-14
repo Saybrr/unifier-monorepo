@@ -5,9 +5,11 @@
 
 use crate::parse_wabbajack::{
     sources::{DownloadSource, HttpSource, NexusSource, GameFileSource, WabbajackCDNSource},
-    operations::{DownloadOperation, ArchiveManifest, ManifestMetadata, OperationMetadata},
+    operations::{ArchiveManifest, ManifestMetadata},
 };
+use crate::downloader::core::{DownloadRequest, DownloadMetadata};
 use serde::Deserialize;
+use std::path::PathBuf;
 
 /// Raw modlist JSON structure as it appears in the file
 #[derive(Debug, Deserialize)]
@@ -123,7 +125,7 @@ impl ModlistParser {
     }
 
     /// Parse a modlist JSON string into an ArchiveManifest
-    pub fn parse(&self, json: &str) -> Result<ArchiveManifest, ParseError> {
+    pub fn parse(&self, json: &str, base_destination: &PathBuf) -> Result<ArchiveManifest, ParseError> {
         let raw_modlist: RawModlist = serde_json::from_str(json)
             .map_err(ParseError::JsonParseError)?;
 
@@ -138,10 +140,10 @@ impl ModlistParser {
             description: raw_modlist.description.clone(),
         };
 
-        // Convert archives to operations
+        // Convert archives to requests
         for (index, archive) in raw_modlist.archives.iter().enumerate() {
-            match self.convert_archive_to_operation(archive, index) {
-                Ok(operation) => manifest.add_operation(operation),
+            match self.convert_archive_to_request(archive, index, base_destination) {
+                Ok(request) => manifest.add_request(request),
                 Err(e) => {
                     // Log the error but continue with other archives
                     eprintln!("Warning: Failed to convert archive '{}': {}", archive.name, e);
@@ -152,31 +154,34 @@ impl ModlistParser {
         Ok(manifest)
     }
 
-    /// Convert a raw archive to a structured download operation
-    fn convert_archive_to_operation(
+    /// Convert a raw archive to a structured download request
+    fn convert_archive_to_request(
         &self,
         archive: &RawArchive,
         index: usize,
-    ) -> Result<DownloadOperation, ParseError> {
+        base_destination: &PathBuf,
+    ) -> Result<DownloadRequest, ParseError> {
         let source = self.convert_downloader_state(&archive.state)?;
 
-        let metadata = OperationMetadata {
+        let metadata = DownloadMetadata {
             description: format!("Archive: {}", archive.name),
             category: self.infer_category(&archive.name),
             required: true, // Most modlist archives are required
             tags: self.extract_tags_from_meta(&archive.meta),
         };
 
-        let operation = DownloadOperation::new(
+        let request = DownloadRequest::new(
             source,
+            base_destination,
             archive.name.clone(),
-            archive.hash.clone(),
             archive.size,
+            archive.hash.clone(),
         )
+        .with_hash_algorithm(&self.default_hash_algorithm)
         .with_priority(index as u32) // Use index as default priority
         .with_metadata(metadata);
 
-        Ok(operation)
+        Ok(request)
     }
 
     /// Convert raw downloader state to structured source
@@ -292,8 +297,8 @@ pub enum ParseError {
 }
 
 /// Convenience function to parse a modlist JSON string
-pub fn parse_modlist(json: &str) -> Result<ArchiveManifest, ParseError> {
-    ModlistParser::new().parse(json)
+pub fn parse_modlist(json: &str, base_destination: &PathBuf) -> Result<ArchiveManifest, ParseError> {
+    ModlistParser::new().parse(json, base_destination)
 }
 
 #[cfg(test)]
@@ -323,16 +328,16 @@ mod tests {
             "Description": "A test modlist"
         }"#;
 
-        let manifest = parse_modlist(json).expect("Failed to parse test modlist");
+        let base_destination = PathBuf::from("/downloads");
+        let manifest = parse_modlist(json, &base_destination).expect("Failed to parse test modlist");
 
-        assert_eq!(manifest.operations.len(), 1);
+        assert_eq!(manifest.requests.len(), 1);
         assert_eq!(manifest.metadata.name, "Test Modlist");
 
-        let operation = &manifest.operations[0];
-        assert_eq!(operation.filename, "test-file.zip");
-        // Note: expected_size field removed since it's unreliable from Wabbajack data
+        let request = &manifest.requests[0];
+        assert_eq!(request.filename, "test-file.zip");
 
-        if let DownloadSource::Http(http_source) = &operation.source {
+        if let DownloadSource::Http(http_source) = &request.source {
             assert_eq!(http_source.url, "https://example.com/file.zip");
         } else {
             panic!("Expected HTTP source");
@@ -364,11 +369,12 @@ mod tests {
             ]
         }"#;
 
-        let manifest = parse_modlist(json).expect("Failed to parse nexus test");
+        let base_destination = std::path::PathBuf::from("/tmp");
+        let manifest = parse_modlist(json, &base_destination).expect("Failed to parse nexus test");
 
-        assert_eq!(manifest.operations.len(), 1);
+        assert_eq!(manifest.requests.len(), 1);
 
-        let operation = &manifest.operations[0];
+        let operation = &manifest.requests[0];
         if let DownloadSource::Nexus(nexus_source) = &operation.source {
             assert_eq!(nexus_source.mod_id, 12345);
             assert_eq!(nexus_source.file_id, 67890);

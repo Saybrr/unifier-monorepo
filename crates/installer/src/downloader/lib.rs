@@ -17,10 +17,42 @@
 
 use crate::downloader::{
     config::DownloadConfig,
-    core::{DownloadRequest, DownloadResult, ProgressCallback, Result, ValidationPool},
+    core::{DownloadRequest, DownloadResult, ProgressCallback, Result, ValidationPool, DownloadSource},
     batch::{DownloadMetrics},
 };
 use std::sync::Arc;
+
+/// Dispatch function to handle different download source types
+async fn dispatch_download(
+    source: &DownloadSource,
+    request: &DownloadRequest,
+    progress_callback: Option<ProgressCallback>,
+    config: &DownloadConfig,
+) -> Result<DownloadResult> {
+    match source {
+        DownloadSource::Http(http_source) => {
+            http_source.download(request, progress_callback, config).await
+        },
+        DownloadSource::WabbajackCDN(cdn_source) => {
+            cdn_source.download(request, progress_callback, config).await
+        },
+        DownloadSource::GameFile(gamefile_source) => {
+            gamefile_source.download(request, progress_callback, config).await
+        },
+        DownloadSource::Nexus(nexus_source) => {
+            nexus_source.download(request, progress_callback, config).await
+        },
+        DownloadSource::Manual(manual_source) => {
+            manual_source.download(request, progress_callback, config).await
+        },
+        DownloadSource::Archive(archive_source) => {
+            archive_source.download(request, progress_callback, config).await
+        },
+        DownloadSource::Unknown(unknown_source) => {
+            unknown_source.download(request, progress_callback, config).await
+        },
+    }
+}
 
 /// Enhanced downloader with retry capability and batch operations
 ///
@@ -52,14 +84,14 @@ impl EnhancedDownloader {
 
     /// Download a single file with retry logic and mirror fallback
     ///
-    /// With the new trait-based architecture, each source handles its own download logic
+    /// With the new enum-based architecture, each source handles its own download logic
     pub async fn download(
         &self,
         request: DownloadRequest,
         progress_callback: Option<ProgressCallback>,
     ) -> Result<DownloadResult> {
-        // Simply delegate to the source's download method
-        request.source.download(&request, progress_callback, &self.config).await
+        // Dispatch to the appropriate download implementation
+        dispatch_download(&request.source, &request, progress_callback, &self.config).await
     }
 
     /// Download a file with async validation option
@@ -99,7 +131,7 @@ impl EnhancedDownloader {
 
             futures.push(async move {
                 let _permit = semaphore.acquire().await.unwrap();
-                request.source.download(&request, progress_callback, &config).await
+                dispatch_download(&request.source, &request, progress_callback, &config).await
             });
         }
 

@@ -5,8 +5,7 @@
 use std::path::{Path, PathBuf};
 use crate::{
     EnhancedDownloader, DownloadConfigBuilder, ProgressCallback,
-    ModlistParser, manifest_to_download_requests_with_stats, ConversionStats,
-    DownloadRequest, Result, DownloadError
+    ModlistParser, Result, DownloadError
 };
 use crate::integrations::progress::DashboardProgressReporter;
 use crate::IntoProgressCallback;
@@ -46,8 +45,8 @@ pub struct ModlistDownloadResult {
     pub total_bytes_downloaded: u64,
     /// Time taken for the entire operation
     pub elapsed_time: std::time::Duration,
-    /// Detailed statistics about conversion from modlist to download requests
-    pub conversion_stats: ConversionStats,
+    /// Total number of requests parsed
+    pub total_requests: usize,
     /// List of error messages for failed downloads
     pub error_messages: Vec<String>,
 }
@@ -129,15 +128,11 @@ impl ModlistDownloadBuilder {
         let modlist_json = std::fs::read_to_string(&self.modlist_path)
             .map_err(|e| DownloadError::Legacy(format!("Failed to read modlist file: {}", e)))?;
 
-        let manifest = ModlistParser::new().parse(&modlist_json)
+        let manifest = ModlistParser::new().parse(&modlist_json, &destination)
             .map_err(|e| DownloadError::Legacy(format!("Failed to parse modlist: {}", e)))?;
 
-        // Convert to download requests
-        let (download_requests, conversion_stats) = manifest_to_download_requests_with_stats(
-            &manifest,
-            &destination,
-            true
-        );
+        // Get requests directly from manifest - no conversion needed!
+        let download_requests = manifest.requests;
 
 
         // Create downloader with appropriate configuration
@@ -197,7 +192,7 @@ impl ModlistDownloadBuilder {
             skipped_downloads: 0, // TODO: Track skipped downloads
             total_bytes_downloaded,
             elapsed_time,
-            conversion_stats,
+            total_requests: manifest.stats.total_operations,
             error_messages,
         })
     }

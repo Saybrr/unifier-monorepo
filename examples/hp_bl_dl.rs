@@ -23,8 +23,7 @@ async fn main() -> Result<()> {
 
    let result = ModlistDownloadBuilder::new("Baseline/modlist")
         .destination("./downloads")
-        .automated_only()                    // Filter out manual/Nexus downloads automatically
-        .high_performance()                  // 8 concurrent validations, async validation, parallel hashing
+        .high_performance()                  // Use high performance configuration
         .max_concurrent_downloads(8)         // Allow 8 simultaneous downloads
         .with_dashboard_progress()           // Built-in beautiful progress dashboard
         .download()
@@ -49,16 +48,17 @@ async fn main() -> Result<()> {
     let speed_mbps = total_mb / result.elapsed_time.as_secs_f64();
     println!("📊 Downloaded: {:.1} MB at {:.1} MB/s", total_mb, speed_mbps);
 
-    // Show conversion statistics (built-in!)
-    let stats = &result.conversion_stats;
+    // Show download statistics
     println!("\n📋 Modlist Statistics:");
-    println!("   Total operations in modlist: {}", stats.total_operations);
-    println!("   Converted to download requests: {}", stats.converted_requests);
-    println!("   Total download size: {:.1} MB", stats.total_download_size as f64 / 1_048_576.0);
+    println!("   Total requests processed: {}", result.total_requests);
+    println!("   Successful downloads: {}", result.successful_downloads);
+    println!("   Failed downloads: {}", result.failed_downloads);
+    println!("   Skipped downloads: {}", result.skipped_downloads);
+    println!("   Total download size: {:.1} MB", result.total_bytes_downloaded as f64 / 1_048_576.0);
 
-    let filtered_count = stats.total_operations - stats.converted_requests;
+    let filtered_count = result.total_requests - result.successful_downloads - result.failed_downloads - result.skipped_downloads;
     if filtered_count > 0 {
-        println!("   Filtered out {} unsupported downloads", filtered_count);
+        println!("   Other downloads: {}", filtered_count);
     }
 
     // Show error summary if there were any (same as original)
@@ -83,7 +83,7 @@ async fn main() -> Result<()> {
     }
 
     if filtered_count > 0 {
-        println!("\nℹ️  Note: {} downloads were skipped (Nexus mods require API keys, Manual downloads need user action)", filtered_count);
+        println!("\nℹ️  Note: {} downloads were skipped (some downloads may require API keys or user action)", filtered_count);
     }
 
 

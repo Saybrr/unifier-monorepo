@@ -1,20 +1,18 @@
 //! GameFile download source implementation
 
-use async_trait::async_trait;
 use std::path::Path;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
 use tracing::{debug, warn};
 
 use crate::downloader::core::{
-    Downloadable, DownloadRequest, DownloadResult, ProgressCallback, Result,
+    DownloadRequest, DownloadResult, ProgressCallback, Result,
     DownloadError, ValidationType, ProgressEvent
 };
 use crate::parse_wabbajack::sources::GameFileSource;
 
-#[async_trait]
-impl Downloadable for GameFileSource {
-    async fn download(
+impl GameFileSource {
+    pub async fn download(
         &self,
         request: &DownloadRequest,
         progress_callback: Option<ProgressCallback>,
@@ -79,13 +77,6 @@ impl Downloadable for GameFileSource {
         Ok(DownloadResult::Downloaded { size })
     }
 
-    fn description(&self) -> String {
-        format!("Game file: {} from {}", self.file_path, self.game)
-    }
-
-    fn requires_external_dependencies(&self) -> bool {
-        true
-    }
 }
 
 impl GameFileSource {

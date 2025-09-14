@@ -40,17 +40,17 @@ pub struct OperationMetadata {
     pub tags: Vec<String>,
 }
 
-/// Complete manifest of all download operations from a modlist
+/// Complete manifest of all download requests from a modlist
 ///
 /// This represents the parsed and processed modlist with all archives
-/// converted to structured download operations.
+/// converted to structured download requests.
 #[derive(Debug)]
 pub struct ArchiveManifest {
-    /// All download operations to perform
-    pub operations: Vec<DownloadOperation>,
+    /// All download requests to perform
+    pub requests: Vec<crate::downloader::core::DownloadRequest>,
     /// Manifest metadata
     pub metadata: ManifestMetadata,
-    /// Operation statistics
+    /// Request statistics
     pub stats: ManifestStats,
 }
 
@@ -81,6 +81,7 @@ pub struct ManifestStats {
     pub manual_operations: usize,
     pub archive_operations: usize,
     pub wabbajack_cdn_operations: usize,
+    pub unknown_operations: usize,
     /// Total expected download size in bytes
     pub total_download_size: u64,
     /// Operations requiring user interaction
@@ -138,47 +139,48 @@ impl ArchiveManifest {
     /// Create a new empty manifest
     pub fn new() -> Self {
         Self {
-            operations: Vec::new(),
+            requests: Vec::new(),
             metadata: ManifestMetadata::default(),
             stats: ManifestStats::default(),
         }
     }
 
-    /// Add an operation to the manifest
-    pub fn add_operation(&mut self, operation: DownloadOperation) {
-        self.operations.push(operation);
+    /// Add a request to the manifest
+    pub fn add_request(&mut self, request: crate::downloader::core::DownloadRequest) {
+        self.requests.push(request);
         self.update_stats();
     }
 
-    /// Add multiple operations to the manifest
-    pub fn add_operations(&mut self, operations: Vec<DownloadOperation>) {
-        self.operations.extend(operations);
+    /// Add multiple requests to the manifest
+    pub fn add_requests(&mut self, requests: Vec<crate::downloader::core::DownloadRequest>) {
+        self.requests.extend(requests);
         self.update_stats();
     }
 
-    /// Update statistics based on current operations
+    /// Update statistics based on current requests
     pub fn update_stats(&mut self) {
         let mut stats = ManifestStats::default();
 
-        stats.total_operations = self.operations.len();
+        stats.total_operations = self.requests.len();
         // Note: total_download_size removed since we don't have reliable size info from Wabbajack
         stats.total_download_size = 0;
 
-        for operation in &self.operations {
-            match &operation.source {
+        for request in &self.requests {
+            match &request.source {
                 DownloadSource::Http(_) => stats.http_operations += 1,
                 DownloadSource::Nexus(_) => stats.nexus_operations += 1,
                 DownloadSource::GameFile(_) => stats.gamefile_operations += 1,
                 DownloadSource::Manual(_) => stats.manual_operations += 1,
                 DownloadSource::Archive(_) => stats.archive_operations += 1,
                 DownloadSource::WabbajackCDN(_) => stats.wabbajack_cdn_operations += 1,
+                DownloadSource::Unknown(_) => stats.unknown_operations += 1,
             }
 
-            if operation.requires_user_interaction() {
+            if request.requires_user_interaction() {
                 stats.user_interaction_required += 1;
             }
 
-            if operation.requires_external_dependencies() {
+            if request.requires_external_dependencies() {
                 stats.external_dependencies_required += 1;
             }
         }
@@ -186,25 +188,25 @@ impl ArchiveManifest {
         self.stats = stats;
     }
 
-    /// Get operations that can be downloaded automatically
-    pub fn automatic_operations(&self) -> Vec<&DownloadOperation> {
-        self.operations.iter()
-            .filter(|op| !op.requires_user_interaction())
+    /// Get requests that can be downloaded automatically
+    pub fn automatic_requests(&self) -> Vec<&crate::downloader::core::DownloadRequest> {
+        self.requests.iter()
+            .filter(|req| !req.requires_user_interaction())
             .collect()
     }
 
-    /// Get operations that require user interaction
-    pub fn manual_operations(&self) -> Vec<&DownloadOperation> {
-        self.operations.iter()
-            .filter(|op| op.requires_user_interaction())
+    /// Get requests that require user interaction
+    pub fn manual_requests(&self) -> Vec<&crate::downloader::core::DownloadRequest> {
+        self.requests.iter()
+            .filter(|req| req.requires_user_interaction())
             .collect()
     }
 
-    /// Get operations sorted by priority (lower priority number = higher priority)
-    pub fn operations_by_priority(&self) -> Vec<&DownloadOperation> {
-        let mut ops: Vec<_> = self.operations.iter().collect();
-        ops.sort_by_key(|op| op.priority);
-        ops
+    /// Get requests sorted by priority (lower priority number = higher priority)
+    pub fn requests_by_priority(&self) -> Vec<&crate::downloader::core::DownloadRequest> {
+        let mut reqs: Vec<_> = self.requests.iter().collect();
+        reqs.sort_by_key(|req| req.priority);
+        reqs
     }
 
 }
