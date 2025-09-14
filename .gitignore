@@ -1,5 +1,6 @@
 /target
 multifiledownloader-rs/
-NolvusDashboard/
+NolvusDashboard/*
 downloads/
 wabbajack/
+.env
