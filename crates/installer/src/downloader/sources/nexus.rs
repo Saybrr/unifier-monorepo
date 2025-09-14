@@ -3,7 +3,7 @@
 use crate::downloader::core::{
     DownloadRequest, DownloadResult, ProgressCallback, Result, DownloadError
 };
-use crate::parse_wabbajack::sources::NexusSource;
+use crate::downloader::sources::NexusSource;
 
 // Placeholder implementation for Nexus downloads
 impl NexusSource {

@@ -3,7 +3,7 @@
 use crate::downloader::core::{
     DownloadRequest, DownloadResult, ProgressCallback, Result, DownloadError
 };
-use crate::parse_wabbajack::sources::ArchiveSource;
+use crate::downloader::sources::ArchiveSource;
 
 // Placeholder implementation for archive extraction
 impl ArchiveSource {

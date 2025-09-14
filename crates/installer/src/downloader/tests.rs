@@ -4,7 +4,7 @@ use super::*;
 use crate::downloader::{
     core::{ErrorSeverity, FileOperation, ValidationType, IntoProgressCallback, NullProgressReporter, ConsoleProgressReporter, CompositeProgressReporter},
 };
-use crate::parse_wabbajack::sources::DownloadSource;
+use crate::downloader::sources::DownloadSource;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tempfile::{tempdir, TempDir};
@@ -207,7 +207,7 @@ mod download_request_tests {
     #[test]
     fn test_download_request_with_mirror() {
         // With trait objects, we need to create HttpSource directly to test mirrors
-        use crate::parse_wabbajack::sources::HttpSource;
+        use crate::downloader::sources::HttpSource;
 
         let http_source = HttpSource::new("https://example.com/file.txt")
             .with_mirror("https://mirror.example.com/file.txt");
@@ -515,7 +515,7 @@ mod enhanced_downloader_tests {
         let primary_url = format!("{}/test-file.txt", primary_server.uri());
 
         // Create HttpSource with mirror directly
-        use crate::parse_wabbajack::sources::HttpSource;
+        use crate::downloader::sources::HttpSource;
         let http_source = HttpSource::new(primary_url)
             .with_mirror(mirror_url);
         let request = DownloadRequest::new(DownloadSource::Http(http_source), temp_dir.path(), "test-file.txt", test_content.len() as u64, "dGVzdA==".to_string());

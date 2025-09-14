@@ -11,7 +11,7 @@ use crate::downloader::core::{
     DownloadRequest, DownloadResult, ProgressCallback, Result,
     DownloadError, ValidationType, ProgressEvent
 };
-use crate::parse_wabbajack::sources::HttpSource;
+use crate::downloader::sources::HttpSource;
 
 impl HttpSource {
     pub async fn download(

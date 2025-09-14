@@ -3,7 +3,7 @@
 use crate::downloader::core::{
     DownloadRequest, DownloadResult, ProgressCallback, Result, DownloadError
 };
-use crate::parse_wabbajack::sources::ManualSource;
+use crate::downloader::sources::ManualSource;
 
 // Placeholder implementation for manual downloads
 impl ManualSource {

@@ -4,10 +4,10 @@
 //! it into structured DownloadOperation objects.
 
 use crate::parse_wabbajack::{
-    sources::{DownloadSource, HttpSource, NexusSource, GameFileSource, WabbajackCDNSource},
     operations::{ArchiveManifest, ManifestMetadata},
 };
-use crate::downloader::core::{DownloadRequest, DownloadMetadata};
+use crate::downloader::core::{DownloadRequest, DownloadMetadata, DownloadSource};
+use crate::downloader::sources::{HttpSource, NexusSource, GameFileSource, WabbajackCDNSource};
 use serde::Deserialize;
 use std::path::PathBuf;
 

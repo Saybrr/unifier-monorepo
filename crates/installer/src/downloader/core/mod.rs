@@ -15,7 +15,7 @@ pub use progress::{ProgressEvent, ProgressCallback, ProgressReporter, IntoProgre
 use std::path::PathBuf;
 
 // Re-export the structured DownloadSource for convenience
-pub use crate::parse_wabbajack::sources::DownloadSource;
+pub use crate::downloader::sources::DownloadSource;
 
 // Trait removed - using enum dispatch instead
 
@@ -80,7 +80,7 @@ impl DownloadRequest {
         expected_size: u64,
         expected_hash: String
     ) -> Self {
-        use crate::parse_wabbajack::sources::HttpSource;
+        use crate::downloader::sources::HttpSource;
         let hash_copy = expected_hash.clone();
         Self {
             source: DownloadSource::Http(HttpSource::new(url)),

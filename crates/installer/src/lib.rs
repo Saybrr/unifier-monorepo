@@ -84,7 +84,6 @@
 
 pub mod downloader;
 pub mod parse_wabbajack;
-pub mod download;
 pub mod integrations;
 
 // Re-export commonly used types for convenience

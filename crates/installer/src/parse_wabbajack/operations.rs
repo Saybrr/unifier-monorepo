@@ -3,7 +3,7 @@
 //! This module defines the structured operations that result from parsing
 //! a Wabbajack modlist and can be processed by the downloader system.
 
-use crate::parse_wabbajack::sources::DownloadSource;
+use crate::downloader::sources::DownloadSource;
 
 /// A complete download operation with all metadata
 ///

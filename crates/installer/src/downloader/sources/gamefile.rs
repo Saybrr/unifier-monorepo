@@ -9,7 +9,7 @@ use crate::downloader::core::{
     DownloadRequest, DownloadResult, ProgressCallback, Result,
     DownloadError, ValidationType, ProgressEvent
 };
-use crate::parse_wabbajack::sources::GameFileSource;
+use crate::downloader::sources::GameFileSource;
 
 impl GameFileSource {
     pub async fn download(

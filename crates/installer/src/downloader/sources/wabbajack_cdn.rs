@@ -14,7 +14,7 @@ use crate::downloader::core::{
     DownloadRequest, DownloadResult, ProgressCallback, Result,
     DownloadError, ValidationType, ProgressEvent
 };
-use crate::parse_wabbajack::sources::WabbajackCDNSource;
+use crate::downloader::sources::WabbajackCDNSource;
 
 // WabbajackCDN specific types
 #[derive(Debug, Deserialize)]
