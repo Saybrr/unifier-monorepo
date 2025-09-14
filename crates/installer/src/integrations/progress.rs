@@ -44,9 +44,18 @@ pub enum OperationStatus {
     },
 }
 
+/// Warning entry for tracking warnings in the dashboard
+#[derive(Debug, Clone)]
+pub struct WarningEntry {
+    pub message: String,
+    pub timestamp: Instant,
+    pub filename: String,
+}
+
 /// Built-in dashboard-style progress reporter
 pub struct DashboardProgressReporter {
     operations: Arc<RwLock<HashMap<String, OperationStatus>>>,
+    warnings: Arc<RwLock<Vec<WarningEntry>>>,
     start_time: Instant,
     last_refresh: Arc<RwLock<Instant>>,
     update_mutex: Arc<tokio::sync::Mutex<()>>,
@@ -64,6 +73,7 @@ impl DashboardProgressReporter {
     pub fn with_style(style: DashboardStyle) -> Self {
         Self {
             operations: Arc::new(RwLock::new(HashMap::new())),
+            warnings: Arc::new(RwLock::new(Vec::new())),
             start_time: Instant::now(),
             last_refresh: Arc::new(RwLock::new(Instant::now())),
             update_mutex: Arc::new(tokio::sync::Mutex::new(())),
@@ -78,11 +88,19 @@ impl DashboardProgressReporter {
         self
     }
 
-    /// Extract filename from URL or file path
+    /// Extract filename from URL or file path, removing query parameters
     fn extract_filename(url: &str) -> String {
-        url.split('/').last()
-            .unwrap_or_else(|| url.split('\\').last().unwrap_or(url))
-            .to_string()
+        // First, get the last part of the path (after / or \)
+        let path_part = url.split('/').last()
+            .unwrap_or_else(|| url.split('\\').last().unwrap_or(url));
+
+        // Then remove query parameters (everything after ?)
+        let clean_filename = path_part.split('?').next().unwrap_or(path_part);
+
+        // Also remove fragment identifiers (everything after #)
+        let clean_filename = clean_filename.split('#').next().unwrap_or(clean_filename);
+
+        clean_filename.to_string()
     }
 
     /// Check if display should be refreshed
@@ -130,6 +148,7 @@ impl DashboardProgressReporter {
         println!();
 
         let operations = self.operations.read().await;
+        let warnings = self.warnings.read().await;
 
         let mut downloading = 0;
         let mut validating = 0;
@@ -150,9 +169,12 @@ impl DashboardProgressReporter {
             }
         }
 
-        // Summary line
-        println!("📊 Status: {} downloading, {} validating, {} completed, {} failed (Total: {:.1} MB/s)",
-                 downloading, validating, completed, failed, total_speed);
+        // Summary line with warnings count
+        let recent_warnings = warnings.iter()
+            .filter(|w| w.timestamp.elapsed() < Duration::from_secs(300)) // Last 5 minutes
+            .count();
+        println!("📊 Status: {} downloading, {} validating, {} completed, {} failed, {} warnings (Total: {:.1} MB/s)",
+                 downloading, validating, completed, failed, recent_warnings, total_speed);
         println!();
 
         // Show active operations
@@ -217,6 +239,34 @@ impl DashboardProgressReporter {
             println!("  (No completed operations yet)");
         }
 
+        // Show recent warnings (last 10)
+        if !warnings.is_empty() {
+            println!();
+            println!("⚠️ Recent Warnings:");
+            let mut warning_count = 0;
+            for warning in warnings.iter().rev() {
+                if warning_count >= 10 { break; }
+                let elapsed = warning.timestamp.elapsed().as_secs();
+                let time_str = if elapsed < 60 {
+                    format!("{}s ago", elapsed)
+                } else {
+                    format!("{}m ago", elapsed / 60)
+                };
+
+                let display_message = if warning.message.len() > 80 {
+                    format!("{}...", &warning.message[..80])
+                } else {
+                    warning.message.clone()
+                };
+
+                println!("  ⚠️  {} - {} ({})", warning.filename, display_message, time_str);
+                warning_count += 1;
+            }
+            if warning_count == 0 {
+                println!("  (No recent warnings)");
+            }
+        }
+
         io::stdout().flush().unwrap();
     }
 
@@ -240,10 +290,14 @@ impl DashboardProgressReporter {
             }
         }
 
-        // Simple one-line status update
+        // Simple one-line status update with warnings count
+        let warnings = self.warnings.read().await;
+        let recent_warnings = warnings.iter()
+            .filter(|w| w.timestamp.elapsed() < Duration::from_secs(300)) // Last 5 minutes
+            .count();
         let elapsed = self.start_time.elapsed();
-        print!("\r🚀 Progress: {} active, {} done, {} failed ({:.1} MB/s, {:.0}s)              ",
-               downloading, completed, failed, total_speed, elapsed.as_secs_f64());
+        print!("\r🚀 Progress: {} active, {} done, {} failed, {} warnings ({:.1} MB/s, {:.0}s)              ",
+               downloading, completed, failed, recent_warnings, total_speed, elapsed.as_secs_f64());
         io::stdout().flush().unwrap();
     }
 }
@@ -417,6 +471,37 @@ impl ProgressReporter for DashboardProgressReporter {
         });
     }
 
+    fn on_warning(&self, url: &str, message: &str) {
+        let filename = Self::extract_filename(url);
+        let warnings = self.warnings.clone();
+        let reporter = Arc::new(self.clone());
+        let message_string = message.to_string();
+
+        // Print warning immediately to stderr for visibility (all styles except quiet)
+        if !matches!(self.style, DashboardStyle::Quiet) {
+            eprintln!("\n⚠️ WARNING: {} - {}", filename, message);
+            io::stderr().flush().unwrap();
+        }
+
+        tokio::spawn(async move {
+            {
+                let mut warnings_list = warnings.write().await;
+                warnings_list.push(WarningEntry {
+                    message: message_string,
+                    timestamp: Instant::now(),
+                    filename,
+                });
+
+                // Keep only the last 50 warnings to prevent memory bloat
+                if warnings_list.len() > 50 {
+                    let excess = warnings_list.len() - 50;
+                    warnings_list.drain(0..excess);
+                }
+            }
+            reporter.update_display().await;
+        });
+    }
+
     fn on_error(&self, url: &str, error: &str) {
         let filename = Self::extract_filename(url);
         let operations = self.operations.clone();
@@ -444,6 +529,7 @@ impl Clone for DashboardProgressReporter {
     fn clone(&self) -> Self {
         Self {
             operations: Arc::clone(&self.operations),
+            warnings: Arc::clone(&self.warnings),
             start_time: self.start_time,
             last_refresh: Arc::clone(&self.last_refresh),
             update_mutex: Arc::clone(&self.update_mutex),

@@ -3,7 +3,7 @@
 use std::path::Path;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
-use tracing::{debug, warn};
+use tracing::debug;
 
 use crate::downloader::core::{
     DownloadRequest, DownloadResult, ProgressCallback, Result,
@@ -314,14 +314,21 @@ impl GameFileSource {
         }
 
         // Validate existing file
-        if validation.validate_file(dest_path, progress_callback).await? {
+        if validation.validate_file(dest_path, progress_callback.clone()).await? {
             let metadata = fs::metadata(dest_path).await?;
             debug!("Using existing validated file: {} ({} bytes)", dest_path.display(), metadata.len());
             Ok(Some(DownloadResult::AlreadyExists {
                 size: metadata.len()
             }))
         } else {
-            warn!("Existing file failed validation, will re-copy: {}", dest_path.display());
+            // Report warning through progress callback
+            if let Some(ref callback) = progress_callback {
+                let url = format!("gamefile://{}", self.file_path);
+                callback(ProgressEvent::Warning {
+                    url,
+                    message: format!("Existing file failed validation, will re-copy: {}", dest_path.display()),
+                });
+            }
             // Remove invalid file
             fs::remove_file(dest_path).await?;
             Ok(None)

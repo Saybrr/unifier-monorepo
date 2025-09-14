@@ -4,7 +4,7 @@ use reqwest::Client;
 use std::path::Path;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 use once_cell::sync::OnceCell;
 
 use crate::downloader::api::nexus_api::NexusAPI;
@@ -31,7 +31,9 @@ pub async fn initialize_nexus_api() -> Result<()> {
             info!("Nexus authentication initialized for user: {} (Premium: {})", user.name, user.is_premium);
         }
         Err(e) => {
-            warn!("Failed to validate Nexus API key: {}", e);
+            // Log error instead of warning since this is initialization
+            // Initialization failures should be handled by the caller
+            debug!("Failed to validate Nexus API key during initialization: {}", e);
             return Err(e);
         }
     }
@@ -99,8 +101,15 @@ impl NexusSource {
         // Get download links
         let download_links = api.get_download_links(&self.game_name, self.mod_id, self.file_id).await
             .map_err(|e| {
-                warn!("Failed to get download links for {}:{}:{}: {}",
-                      self.game_name, self.mod_id, self.file_id, e);
+                // Report warning through progress callback
+                if let Some(ref callback) = progress_callback {
+                    let url = format!("nexus://{}:{}", self.mod_id, self.file_id);
+                    callback(ProgressEvent::Warning {
+                        url,
+                        message: format!("Failed to get download links for {}:{}:{}: {}",
+                                       self.game_name, self.mod_id, self.file_id, e),
+                    });
+                }
                 e
             })?;
 
@@ -126,14 +135,59 @@ impl NexusSource {
             })?;
         }
 
-        // Download the file using the download link
-        let final_size = self.download_from_url(&download_link.uri, &dest_path,
-                                               progress_callback.clone(), config).await?;
+        // Download the file using the download link with retry logic
+        let expected_size = request.validation.expected_size;
+        let final_size = self.download_with_retry(&download_link.uri, &dest_path,
+                                                 progress_callback.clone(), config, expected_size).await?;
 
         // Validate the downloaded file
         self.validate_downloaded_file(&dest_path, &request.validation, progress_callback).await?;
 
         Ok(DownloadResult::Downloaded { size: final_size })
+    }
+
+    /// Download file with retry logic and exponential backoff
+    async fn download_with_retry(
+        &self,
+        url: &str,
+        dest_path: &Path,
+        progress_callback: Option<ProgressCallback>,
+        config: &crate::downloader::config::DownloadConfig,
+        expected_size: Option<u64>,
+    ) -> Result<u64> {
+        let mut last_error = None;
+
+        for attempt in 0..=config.max_retries {
+            if attempt > 0 {
+                // Calculate exponential backoff delay
+                let delay = config.get_retry_delay(attempt - 1);
+                debug!("Nexus retry attempt {} for {} after {:?} delay", attempt, url, delay);
+
+                // Report retry attempt
+                if let Some(ref callback) = progress_callback {
+                    callback(ProgressEvent::RetryAttempt {
+                        url: url.to_string(),
+                        attempt,
+                        max_attempts: config.max_retries,
+                    });
+                }
+
+                tokio::time::sleep(delay).await;
+            }
+
+            match self.download_from_url(url, dest_path, progress_callback.clone(), config, expected_size).await {
+                Ok(size) => return Ok(size),
+                Err(e) => {
+                    last_error = Some(e);
+                    // Continue to retry for recoverable errors
+                    // TODO: Check if error is recoverable
+                    continue;
+                }
+            }
+        }
+
+        // All retries exhausted
+        Err(last_error.unwrap())
     }
 
     /// Download file from the provided URL
@@ -143,16 +197,46 @@ impl NexusSource {
         dest_path: &Path,
         progress_callback: Option<ProgressCallback>,
         config: &crate::downloader::config::DownloadConfig,
+        expected_size: Option<u64>,
     ) -> Result<u64> {
+        // Use appropriate timeout based on expected file size
+        let timeout = expected_size
+            .map(|size| config.get_timeout_for_size(size))
+            .unwrap_or(config.timeout);
+
+        debug!("Using timeout {:?} for Nexus file of size {:?}", timeout, expected_size);
+
         let client = Client::builder()
             .user_agent(&config.user_agent)
-            .timeout(config.timeout)
+            .timeout(timeout)
             .build()
             .map_err(|e| DownloadError::Legacy(format!("Failed to create HTTP client: {}", e)))?;
 
-        debug!("Starting download from: {}", url);
+        // Check for existing partial file and enable resume
+        let temp_path = dest_path.with_extension("part");
+        let start_byte = if config.allow_resume && temp_path.exists() {
+            let size = fs::metadata(&temp_path).await
+                .map_err(|e| DownloadError::FileSystem {
+                    path: temp_path.clone(),
+                    operation: FileOperation::Metadata,
+                    source: e,
+                })?.len();
+            debug!("Found partial Nexus file, resuming from byte {}", size);
+            size
+        } else {
+            0
+        };
 
-        let response = client.get(url).send().await
+        debug!("Starting download from: {} (resume from byte {})", url, start_byte);
+
+        // Build request with range header for resume
+        let mut request = client.get(url);
+        if start_byte > 0 {
+            request = request.header("Range", format!("bytes={}-", start_byte));
+            debug!("Requesting range: bytes={}-", start_byte);
+        }
+
+        let response = request.send().await
             .map_err(|e| DownloadError::HttpRequest {
                 url: url.to_string(),
                 source: e,
@@ -165,18 +249,38 @@ impl NexusSource {
             });
         }
 
-        let total_size = response.content_length().unwrap_or(0);
-        debug!("Content length: {} bytes", total_size);
+        let content_length = response.content_length().unwrap_or(0);
+        let total_size = if start_byte > 0 {
+            start_byte + content_length
+        } else {
+            content_length
+        };
+        debug!("Content length: {} bytes, total expected: {} bytes", content_length, total_size);
 
-        // Create the output file
-        let mut file = fs::File::create(dest_path).await.map_err(|e| DownloadError::FileSystem {
-            path: dest_path.to_path_buf(),
-            operation: FileOperation::Create,
-            source: e,
-        })?;
+        // Create or open the output file for append
+        let mut file = if start_byte > 0 {
+            fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&temp_path)
+                .await
+                .map_err(|e| DownloadError::FileSystem {
+                    path: temp_path.clone(),
+                    operation: FileOperation::Write,
+                    source: e,
+                })?
+        } else {
+            fs::File::create(&temp_path).await.map_err(|e| DownloadError::FileSystem {
+                path: temp_path.clone(),
+                operation: FileOperation::Create,
+                source: e,
+            })?
+        };
 
-        let mut downloaded = 0u64;
+        let mut downloaded = start_byte;
         let mut stream = response.bytes_stream();
+        let start_time = std::time::Instant::now();
+        let mut last_progress_time = start_time;
 
         // Download with progress reporting
         use futures::StreamExt;
@@ -187,37 +291,55 @@ impl NexusSource {
             })?;
 
             file.write_all(&chunk).await.map_err(|e| DownloadError::FileSystem {
-                path: dest_path.to_path_buf(),
+                path: temp_path.clone(),
                 operation: FileOperation::Write,
                 source: e,
             })?;
 
             downloaded += chunk.len() as u64;
 
-            // Report progress
-            if let Some(ref callback) = progress_callback {
-                callback(ProgressEvent::DownloadProgress {
-                    url: url.to_string(),
-                    downloaded,
-                    total: if total_size > 0 { Some(total_size) } else { None },
-                    speed_bps: 0.0, // TODO: calculate actual speed
-                });
+            // Report progress at most every 100ms to avoid spam
+            let now = std::time::Instant::now();
+            if now.duration_since(last_progress_time).as_millis() >= 100 {
+                if let Some(ref callback) = progress_callback {
+                    let elapsed = start_time.elapsed().as_secs_f64();
+                    let speed = if elapsed > 0.0 {
+                        (downloaded - start_byte) as f64 / elapsed
+                    } else {
+                        0.0
+                    };
+
+                    callback(ProgressEvent::DownloadProgress {
+                        url: url.to_string(),
+                        downloaded,
+                        total: if total_size > 0 { Some(total_size) } else { None },
+                        speed_bps: speed,
+                    });
+                }
+                last_progress_time = now;
             }
         }
 
         file.flush().await.map_err(|e| DownloadError::FileSystem {
-            path: dest_path.to_path_buf(),
+            path: temp_path.clone(),
             operation: FileOperation::Write,
             source: e,
         })?;
 
         file.sync_all().await.map_err(|e| DownloadError::FileSystem {
+            path: temp_path.clone(),
+            operation: FileOperation::Write,
+            source: e,
+        })?;
+
+        // Move temp file to final destination
+        fs::rename(&temp_path, dest_path).await.map_err(|e| DownloadError::FileSystem {
             path: dest_path.to_path_buf(),
             operation: FileOperation::Write,
             source: e,
         })?;
 
-        debug!("Download completed: {} bytes", downloaded);
+        debug!("Nexus download completed: {} bytes", downloaded);
         Ok(downloaded)
     }
 

@@ -39,6 +39,10 @@ pub enum ProgressEvent {
         attempt: usize,
         max_attempts: usize,
     },
+    Warning {
+        url: String,
+        message: String,
+    },
     Error {
         url: String,
         error: String,
@@ -54,6 +58,7 @@ pub trait ProgressReporter: Send + Sync {
     fn on_validation_progress(&self, _file: &str, _progress: f64) {}
     fn on_validation_complete(&self, _file: &str, _valid: bool) {}
     fn on_retry_attempt(&self, _url: &str, _attempt: usize, _max_attempts: usize) {}
+    fn on_warning(&self, _url: &str, _message: &str) {}
     fn on_error(&self, _url: &str, _error: &str) {}
 }
 
@@ -85,6 +90,9 @@ impl<T: ProgressReporter + 'static> IntoProgressCallback for T {
             }
             ProgressEvent::RetryAttempt { url, attempt, max_attempts } => {
                 self.on_retry_attempt(&url, attempt, max_attempts);
+            }
+            ProgressEvent::Warning { url, message } => {
+                self.on_warning(&url, &message);
             }
             ProgressEvent::Error { url, error } => {
                 self.on_error(&url, &error);
@@ -154,6 +162,10 @@ impl ProgressReporter for ConsoleProgressReporter {
 
     fn on_retry_attempt(&self, url: &str, attempt: usize, max_attempts: usize) {
         println!("🔄 Retry {}/{} for: {}", attempt, max_attempts, url);
+    }
+
+    fn on_warning(&self, url: &str, message: &str) {
+        eprintln!("⚠️ Warning for {}: {}", url, message);
     }
 
     fn on_error(&self, url: &str, error: &str) {
@@ -239,6 +251,12 @@ impl ProgressReporter for CompositeProgressReporter {
     fn on_retry_attempt(&self, url: &str, attempt: usize, max_attempts: usize) {
         for reporter in &self.reporters {
             reporter.on_retry_attempt(url, attempt, max_attempts);
+        }
+    }
+
+    fn on_warning(&self, url: &str, message: &str) {
+        for reporter in &self.reporters {
+            reporter.on_warning(url, message);
         }
     }
 

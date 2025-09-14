@@ -9,17 +9,38 @@
 
 use installer::*;
 use std::time::Duration;
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, Layer};
+use std::fs::OpenOptions;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Initialize tracing with info level (same as before)
-    tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::INFO)
+    // Initialize tracing with layered output - INFO to console, DEBUG to file
+    let log_file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("downloader.log")
+        .expect("Failed to create log file");
+
+    let console_layer = tracing_subscriber::fmt::layer()
+        .with_target(false)
+        .with_level(true)
+        .with_filter(tracing_subscriber::filter::LevelFilter::INFO);
+
+    let file_layer = tracing_subscriber::fmt::layer()
+        .with_writer(log_file)
+        .with_target(true)
+        .with_level(true)
+        .with_ansi(false)
+        .with_filter(tracing_subscriber::filter::LevelFilter::DEBUG);
+
+    tracing_subscriber::registry()
+        .with(console_layer)
+        .with(file_layer)
         .init();
 
-
-    // Test debug logging
-    tracing::debug!("DEBUG LOGGING IS ENABLED - you should see this message");
+    // Test debug logging - this should only appear in the log file now
+    tracing::debug!("DEBUG LOGGING IS ENABLED - you should see this message in downloader.log");
+    tracing::info!("Downloader starting - console and file logging initialized");
 
    let downloader = ModlistDownloader::new(
     "Baseline/modlist",

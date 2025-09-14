@@ -52,6 +52,7 @@ impl ProgressCapture {
                 ProgressEvent::ValidationProgress { .. } => event_type == "validation_progress",
                 ProgressEvent::ValidationComplete { .. } => event_type == "validation_complete",
                 ProgressEvent::RetryAttempt { .. } => event_type == "retry_attempt",
+                ProgressEvent::Warning { .. } => event_type == "warning",
                 ProgressEvent::Error { .. } => event_type == "error",
             })
             .count()

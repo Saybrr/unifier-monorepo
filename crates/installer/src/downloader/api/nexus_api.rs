@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::time::sleep;
-use tracing::{debug, warn};
+use tracing::debug;
 
 use crate::downloader::core::{DownloadError, Result};
 
@@ -433,7 +433,7 @@ impl NexusAPI {
 
             if status == 429 {
                 // Rate limited - wait and retry once
-                warn!("Rate limited by Nexus API, waiting...");
+                debug!("Rate limited by Nexus API, waiting...");
                 if let Some(wait_time) = self.get_rate_limit_wait_time() {
                     sleep(wait_time).await;
                     return Err(DownloadError::Legacy("Rate limited by Nexus API".to_string()));
@@ -504,7 +504,7 @@ impl NexusAPI {
     /// Wait for rate limit to be available
     async fn wait_for_rate_limit(&self) -> Result<()> {
         if let Some(wait_time) = self.get_rate_limit_wait_time() {
-            warn!("Rate limited, waiting {:?} before making request", wait_time);
+            debug!("Rate limited, waiting {:?} before making request", wait_time);
             sleep(wait_time).await;
         }
         Ok(())
