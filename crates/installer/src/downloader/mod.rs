@@ -10,7 +10,7 @@ pub mod sources;
 pub mod r#lib;
 
 // Re-export main types for convenience
-pub use r#lib::EnhancedDownloader;
+pub use r#lib::Downloader;
 pub use core::{
     DownloadRequest, DownloadResult, DownloadMetadata,
     ProgressCallback, ProgressEvent, ProgressReporter, IntoProgressCallback,
@@ -18,7 +18,7 @@ pub use core::{
     FileValidation, ValidationHandle, ValidationPool,
     DownloadError, Result, ErrorSeverity, FileOperation, ValidationType, ErrorContext,
 };
-pub use config::{DownloadConfig, DownloadConfigBuilder};
+pub use config::{DownloadConfig};
 pub use batch::{DownloadMetrics, DownloadMetricsSnapshot, BatchDownloadResult};
 
 // Re-export source types

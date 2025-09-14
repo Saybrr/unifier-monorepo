@@ -184,5 +184,7 @@ pub enum DownloadResult {
         size: u64,
         validation_handle: ValidationHandle,
     },
+    /// File was skipped
+    Skipped { reason: String },
 }
 

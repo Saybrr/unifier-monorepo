@@ -260,7 +260,7 @@ mod http_downloader_tests {
     #[tokio::test]
     async fn test_enhanced_downloader_creation() {
         let config = DownloadConfig::default();
-        let downloader = EnhancedDownloader::new(config);
+        let downloader = Downloader::new(config);
 
         // Test that the downloader can be created and has metrics
         assert!(downloader.metrics().successful_downloads.load(std::sync::atomic::Ordering::Relaxed) == 0);
@@ -297,7 +297,7 @@ mod http_downloader_tests {
         let request = DownloadRequest::new_http(url, temp_dir.path(), "test-file.txt", test_content.len() as u64, "dGVzdA==".to_string());
 
         let config = DownloadConfig::default();
-        let downloader = EnhancedDownloader::new(config);
+        let downloader = Downloader::new(config);
         let progress = ProgressCapture::new();
 
         let result = downloader
@@ -337,7 +337,7 @@ mod http_downloader_tests {
         let request = DownloadRequest::new_http("https://example.com/file.txt", temp_dir.path(), "existing-file.txt", test_content.len() as u64, "dGVzdA==".to_string());
 
         let config = DownloadConfig::default();
-        let downloader = EnhancedDownloader::new(config);
+        let downloader = Downloader::new(config);
 
         let result = downloader.download(request, None).await;
 
@@ -380,7 +380,7 @@ mod http_downloader_tests {
         let request = DownloadRequest::new_http(url, temp_dir.path(), "test-file.txt", 1024, "AAAAAAAAAA8=".to_string());
 
         let config = DownloadConfig::default();
-        let downloader = EnhancedDownloader::new(config);
+        let downloader = Downloader::new(config);
 
         let result = downloader.download(request, None).await;
 
@@ -417,7 +417,7 @@ mod http_downloader_tests {
         let request = DownloadRequest::new_http(url, temp_dir.path(), "error-file.txt", 1024, "dGVzdA==".to_string());
 
         let config = DownloadConfig::default();
-        let downloader = EnhancedDownloader::new(config);
+        let downloader = Downloader::new(config);
 
         let result = downloader.download(request, None).await;
 
@@ -467,7 +467,7 @@ mod enhanced_downloader_tests {
         let request = DownloadRequest::new_http(url, temp_dir.path(), "enhanced-test.txt", test_content.len() as u64, "dGVzdA==".to_string());
 
         let config = DownloadConfig::default();
-        let downloader = EnhancedDownloader::new(config);
+        let downloader = Downloader::new(config);
         let progress = ProgressCapture::new();
 
         let result = downloader
@@ -523,7 +523,7 @@ mod enhanced_downloader_tests {
         let mut config = DownloadConfig::default();
         config.max_retries = 2; // Reduce retries for faster test
 
-        let downloader = EnhancedDownloader::new(config);
+        let downloader = Downloader::new(config);
         let progress = ProgressCapture::new();
 
         let result = downloader
@@ -560,7 +560,7 @@ mod enhanced_downloader_tests {
         ];
 
         let config = DownloadConfig::default();
-        let downloader = EnhancedDownloader::new(config);
+        let downloader = Downloader::new(config);
         let progress = ProgressCapture::new();
 
         let results = downloader
@@ -610,7 +610,7 @@ mod enhanced_downloader_tests {
         let mut config = DownloadConfig::default();
         config.max_retries = 2; // Small number for faster test
 
-        let downloader = EnhancedDownloader::new(config);
+        let downloader = Downloader::new(config);
 
         let result = downloader.download(request, None).await;
 
@@ -662,7 +662,7 @@ mod integration_tests {
         let request = DownloadRequest::new_http(url, temp_dir.path(), "validated-file.txt", expected_size, expected_xxhash64_base64);
 
         let config = DownloadConfig::default();
-        let downloader = EnhancedDownloader::new(config);
+        let downloader = Downloader::new(config);
         let progress = ProgressCapture::new();
 
         let result = downloader
@@ -805,64 +805,12 @@ mod config_builder_tests {
         assert_eq!(config.timeout, Duration::from_secs(30));
         assert_eq!(config.user_agent, "installer/0.1.0");
         assert!(config.allow_resume);
-        assert_eq!(config.chunk_size, 8192);
         assert_eq!(config.max_concurrent_validations, 4);
         assert!(config.async_validation);
         assert_eq!(config.validation_retries, 2);
     }
 
-    #[test]
-    fn test_config_builder_basic() {
-        let config = DownloadConfigBuilder::new()
-            .max_retries(5)
-            .timeout(Duration::from_secs(60))
-            .user_agent("test-agent/1.0")
-            .build();
-
-        assert_eq!(config.max_retries, 5);
-        assert_eq!(config.timeout, Duration::from_secs(60));
-        assert_eq!(config.user_agent, "test-agent/1.0");
-    }
-
-    #[test]
-    fn test_config_builder_high_performance() {
-        let config = DownloadConfigBuilder::new()
-            .high_performance()
-            .build();
-
-        assert_eq!(config.max_concurrent_validations, 8);
-        assert!(config.async_validation);
-        assert!(config.parallel_validation);
-        assert_eq!(config.chunk_size, 16384);
-        assert_eq!(config.streaming_threshold, 20_000_000);
-    }
-
-    #[test]
-    fn test_config_builder_low_memory() {
-        let config = DownloadConfigBuilder::new()
-            .low_memory()
-            .build();
-
-        assert_eq!(config.max_concurrent_validations, 2);
-        assert!(!config.async_validation);
-        assert!(!config.parallel_validation);
-        assert_eq!(config.chunk_size, 4096);
-        assert_eq!(config.streaming_threshold, 1_000_000);
-    }
-
-    #[test]
-    fn test_config_builder_reliable() {
-        let config = DownloadConfigBuilder::new()
-            .reliable()
-            .build();
-
-        assert_eq!(config.max_retries, 5);
-        assert_eq!(config.validation_retries, 3);
-        assert_eq!(config.timeout, Duration::from_secs(60));
-        assert!(!config.async_validation);
-    }
 }
-
 #[cfg(test)]
 mod progress_reporter_tests {
     use super::*;
@@ -981,39 +929,6 @@ mod metrics_tests {
         assert_eq!(snapshot.retries_attempted, 3);
     }
 }
-
-#[cfg(test)]
-mod http_downloader_enhanced_tests {
-    use super::*;
-
-    #[test]
-    fn test_http_downloader_presets() {
-        // Static factory methods removed - use DownloadConfigBuilder to create specialized configs
-        let large_files_downloader = EnhancedDownloader::new(
-            DownloadConfigBuilder::new()
-                .high_performance()
-                .timeout(std::time::Duration::from_secs(300))
-                .build()
-        );
-        let small_files_downloader = EnhancedDownloader::new(
-            DownloadConfigBuilder::new()
-                .timeout(std::time::Duration::from_secs(30))
-                .build()
-        );
-        let reliable_downloader = EnhancedDownloader::new(
-            DownloadConfigBuilder::new()
-                .reliable()
-                .build()
-        );
-
-        // These should not panic and should create valid downloaders
-        // Test that they have valid metrics (since supports_url doesn't exist anymore)
-        assert!(large_files_downloader.metrics().successful_downloads.load(std::sync::atomic::Ordering::Relaxed) == 0);
-        assert!(small_files_downloader.metrics().successful_downloads.load(std::sync::atomic::Ordering::Relaxed) == 0);
-        assert!(reliable_downloader.metrics().successful_downloads.load(std::sync::atomic::Ordering::Relaxed) == 0);
-    }
-}
-
 #[cfg(test)]
 mod new_enhanced_downloader_tests {
     use super::*;
@@ -1021,7 +936,7 @@ mod new_enhanced_downloader_tests {
     #[test]
     fn test_enhanced_downloader_creation() {
         let config = DownloadConfig::default();
-        let downloader = EnhancedDownloader::new(config);
+        let downloader = Downloader::new(config);
 
         let metrics = downloader.metrics();
         let snapshot = metrics.snapshot();
@@ -1067,12 +982,9 @@ mod enhanced_integration_tests {
             .await;
 
         // Create enhanced configuration
-        let config = DownloadConfigBuilder::new()
-            .high_performance()
-            .max_retries(2)
-            .build();
+        let config = DownloadConfig::default();
 
-        let downloader = EnhancedDownloader::new(config);
+        let downloader = Downloader::new(config);
         let temp_dir = tempdir().unwrap();
         let url = format!("{}/enhanced-test.txt", mock_server.uri());
 

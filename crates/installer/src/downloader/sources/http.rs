@@ -2,6 +2,7 @@
 
 use futures::StreamExt;
 use reqwest::Client;
+use std::collections::HashMap;
 use std::path::Path;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
@@ -11,7 +12,17 @@ use crate::downloader::core::{
     DownloadRequest, DownloadResult, ProgressCallback, Result,
     DownloadError, ValidationType, ProgressEvent
 };
-use crate::downloader::sources::HttpSource;
+
+/// HTTP download source
+#[derive(Debug, Clone, PartialEq)]
+pub struct HttpSource {
+    /// Primary download URL
+    pub url: String,
+    /// Optional HTTP headers to send with request
+    pub headers: HashMap<String, String>,
+    /// Optional fallback URLs if primary fails
+    pub mirror_urls: Vec<String>,
+}
 
 impl HttpSource {
     pub async fn download(
@@ -272,5 +283,26 @@ impl HttpSource {
             }
         }
         Ok(None)
+    }
+}
+
+// Builder methods for HttpSource
+impl HttpSource {
+    pub fn new<S: Into<String>>(url: S) -> Self {
+        Self {
+            url: url.into(),
+            headers: HashMap::new(),
+            mirror_urls: Vec::new(),
+        }
+    }
+
+    pub fn with_header<K: Into<String>, V: Into<String>>(mut self, key: K, value: V) -> Self {
+        self.headers.insert(key.into(), value.into());
+        self
+    }
+
+    pub fn with_mirror<S: Into<String>>(mut self, mirror_url: S) -> Self {
+        self.mirror_urls.push(mirror_url.into());
+        self
     }
 }

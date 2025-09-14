@@ -3,7 +3,15 @@
 use crate::downloader::core::{
     DownloadRequest, DownloadResult, ProgressCallback, Result, DownloadError
 };
-use crate::downloader::sources::ManualSource;
+
+/// Manual download source (user must provide)
+#[derive(Debug, Clone, PartialEq)]
+pub struct ManualSource {
+    /// Instructions for the user
+    pub instructions: String,
+    /// Optional URL where user can find the file
+    pub url: Option<String>,
+}
 
 // Placeholder implementation for manual downloads
 impl ManualSource {
@@ -16,5 +24,19 @@ impl ManualSource {
         Err(DownloadError::Legacy(
             format!("Manual download required: {}", self.instructions)
         ))
+    }
+}
+
+impl ManualSource {
+    pub fn new<S: Into<String>>(instructions: S) -> Self {
+        Self {
+            instructions: instructions.into(),
+            url: None,
+        }
+    }
+
+    pub fn with_url<S: Into<String>>(mut self, url: S) -> Self {
+        self.url = Some(url.into());
+        self
     }
 }

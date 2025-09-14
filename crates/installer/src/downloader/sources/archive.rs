@@ -3,7 +3,15 @@
 use crate::downloader::core::{
     DownloadRequest, DownloadResult, ProgressCallback, Result, DownloadError
 };
-use crate::downloader::sources::ArchiveSource;
+
+/// Archive extraction source
+#[derive(Debug, Clone, PartialEq)]
+pub struct ArchiveSource {
+    /// Hash of the source archive
+    pub archive_hash: String,
+    /// Path within the archive to extract
+    pub inner_path: String,
+}
 
 // Placeholder implementation for archive extraction
 impl ArchiveSource {
@@ -16,5 +24,14 @@ impl ArchiveSource {
         Err(DownloadError::Legacy(
             "Archive extraction not yet implemented in new architecture".to_string()
         ))
+    }
+}
+
+impl ArchiveSource {
+    pub fn new<S1: Into<String>, S2: Into<String>>(archive_hash: S1, inner_path: S2) -> Self {
+        Self {
+            archive_hash: archive_hash.into(),
+            inner_path: inner_path.into(),
+        }
     }
 }

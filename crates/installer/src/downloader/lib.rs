@@ -62,13 +62,13 @@ async fn dispatch_download(
 /// - Async validation with automatic retries
 /// - Built-in performance metrics
 /// - Mirror URL fallback support
-pub struct EnhancedDownloader {
+pub struct Downloader {
     config: DownloadConfig,
     _validation_pool: ValidationPool,
     metrics: Arc<DownloadMetrics>,
 }
 
-impl EnhancedDownloader {
+impl Downloader {
     /// Create a new downloader
     pub fn new(config: DownloadConfig) -> Self {
         let validation_pool = ValidationPool::new(config.max_concurrent_validations);

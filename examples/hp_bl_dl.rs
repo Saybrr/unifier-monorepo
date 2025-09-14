@@ -7,6 +7,7 @@
 //! 5. Built-in error handling and statistics
 
 use installer::*;
+use std::path::PathBuf;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -21,13 +22,13 @@ async fn main() -> Result<()> {
     // Test debug logging
     tracing::debug!("DEBUG LOGGING IS ENABLED - you should see this message");
 
-   let result = ModlistDownloadBuilder::new("Baseline/modlist")
-        .destination("./downloads")
-        .high_performance()                  // Use high performance configuration
-        .max_concurrent_downloads(8)         // Allow 8 simultaneous downloads
-        .with_dashboard_progress()           // Built-in beautiful progress dashboard
-        .download()
-        .await?;
+   let downloader = ModlistDownloader::new(
+    "Baseline/modlist",
+    "./downloads",
+    ModlistOptions::default(),
+    Some(DashboardProgressReporter::new().into_callback())
+    );
+    let result = downloader.download().await?;
 
     // ===========================================
     // Results and Statistics (built-in!)
@@ -65,20 +66,8 @@ async fn main() -> Result<()> {
     if !result.error_messages.is_empty() {
         println!("\n📋 ERROR SUMMARY:");
         println!("  Download/Validation Failures ({}):", result.error_messages.len());
-
-        // Show first 5 errors to avoid spam
-        for (i, error) in result.error_messages.iter().enumerate() {
-            if i >= 5 {
-                println!("    ... and {} more errors", result.error_messages.len() - 5);
-                break;
-            }
-            // Truncate long errors
-            let display_error = if error.len() > 80 {
-                format!("{}...", &error[..77])
-            } else {
-                error.clone()
-            };
-            println!("    ❌ {}", display_error);
+        for error in result.error_messages {
+            println!("    ❌ {}", error);
         }
     }
 

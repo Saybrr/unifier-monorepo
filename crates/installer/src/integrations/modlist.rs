@@ -2,9 +2,9 @@
 //!
 //! Provides a simple, fluent API for downloading entire modlists with sensible defaults.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use crate::{
-    EnhancedDownloader, DownloadConfigBuilder, ProgressCallback,
+    Downloader, DownloadConfig, ProgressCallback,
     ModlistParser, Result, DownloadError
 };
 use crate::integrations::progress::DashboardProgressReporter;
@@ -25,7 +25,7 @@ pub struct ModlistOptions {
 impl Default for ModlistOptions {
     fn default() -> Self {
         Self {
-            max_concurrent_downloads: 4,
+            max_concurrent_downloads: std::thread::available_parallelism().unwrap().get(),
             high_performance: true,
             timeout_seconds: 120,
         }
@@ -52,53 +52,22 @@ pub struct ModlistDownloadResult {
 }
 
 /// Fluent API builder for modlist downloads
-pub struct ModlistDownloadBuilder {
+pub struct ModlistDownloader {
     modlist_path: PathBuf,
-    destination: Option<PathBuf>,
+    destination: PathBuf,
     options: ModlistOptions,
     progress_callback: Option<ProgressCallback>,
 }
 
-impl ModlistDownloadBuilder {
+impl ModlistDownloader {
     /// Create a new builder for the given modlist file
-    pub fn new<P: AsRef<Path>>(modlist_path: P) -> Self {
+    pub fn new(modlist_path: &str, destination: &str, options: ModlistOptions, progress_callback: Option<ProgressCallback>) -> Self {
         Self {
-            modlist_path: modlist_path.as_ref().to_path_buf(),
-            destination: None,
-            options: ModlistOptions::default(),
-            progress_callback: None,
+            modlist_path: PathBuf::from(modlist_path),
+            destination: PathBuf::from(destination),
+            options,
+            progress_callback,
         }
-    }
-
-    /// Set the destination directory for downloads
-    pub fn destination<P: AsRef<Path>>(mut self, destination: P) -> Self {
-        self.destination = Some(destination.as_ref().to_path_buf());
-        self
-    }
-
-
-    /// Set maximum concurrent downloads
-    pub fn max_concurrent_downloads(mut self, max: usize) -> Self {
-        self.options.max_concurrent_downloads = max;
-        self
-    }
-
-    /// Use high-performance configuration (8 concurrent validations, async validation)
-    pub fn high_performance(mut self) -> Self {
-        self.options.high_performance = true;
-        self
-    }
-
-    /// Use standard performance configuration (less resource intensive)
-    pub fn standard_performance(mut self) -> Self {
-        self.options.high_performance = false;
-        self
-    }
-
-    /// Set timeout for individual downloads
-    pub fn timeout_seconds(mut self, seconds: u64) -> Self {
-        self.options.timeout_seconds = seconds;
-        self
     }
 
     /// Use a built-in dashboard-style progress reporter
@@ -122,13 +91,12 @@ impl ModlistDownloadBuilder {
         let start_time = std::time::Instant::now();
 
         // Use current directory as default destination
-        let destination = self.destination.unwrap_or_else(|| PathBuf::from("./downloads"));
 
         // Read and parse the modlist
         let modlist_json = std::fs::read_to_string(&self.modlist_path)
             .map_err(|e| DownloadError::Legacy(format!("Failed to read modlist file: {}", e)))?;
 
-        let manifest = ModlistParser::new().parse(&modlist_json, &destination)
+        let manifest = ModlistParser::new().parse(&modlist_json, &self.destination)
             .map_err(|e| DownloadError::Legacy(format!("Failed to parse modlist: {}", e)))?;
 
         // Get requests directly from manifest - no conversion needed!
@@ -136,18 +104,7 @@ impl ModlistDownloadBuilder {
 
 
         // Create downloader with appropriate configuration
-        let config = if self.options.high_performance {
-            DownloadConfigBuilder::new()
-                .high_performance()
-                .timeout(std::time::Duration::from_secs(self.options.timeout_seconds))
-                .build()
-        } else {
-            DownloadConfigBuilder::new()
-                .timeout(std::time::Duration::from_secs(self.options.timeout_seconds))
-                .build()
-        };
-
-        let downloader = EnhancedDownloader::new(config);
+        let downloader = Downloader::new(DownloadConfig::default());
 
         // Execute batch download
         let results = downloader.download_batch_with_async_validation(
@@ -161,19 +118,23 @@ impl ModlistDownloadBuilder {
         let mut failed_downloads = 0;
         let mut total_bytes_downloaded = 0;
         let mut error_messages = Vec::new();
-
+        let mut skipped_downloads = 0;
         for result in results {
             match result {
                 Ok(download_result) => {
-                    successful_downloads += 1;
                     match download_result {
                         crate::DownloadResult::Downloaded { size } |
                         crate::DownloadResult::AlreadyExists { size } |
                         crate::DownloadResult::Resumed { size } => {
                             total_bytes_downloaded += size;
+                            successful_downloads += 1;
                         }
                         crate::DownloadResult::DownloadedPendingValidation { size, .. } => {
                             total_bytes_downloaded += size;
+                        }
+
+                        crate::DownloadResult::Skipped { reason: _ } => {
+                            skipped_downloads += 1;
                         }
                     }
                 }
@@ -189,7 +150,7 @@ impl ModlistDownloadBuilder {
         Ok(ModlistDownloadResult {
             successful_downloads,
             failed_downloads,
-            skipped_downloads: 0, // TODO: Track skipped downloads
+            skipped_downloads: skipped_downloads, // TODO: Track skipped downloads
             total_bytes_downloaded,
             elapsed_time,
             total_requests: manifest.stats.total_operations,
@@ -198,14 +159,3 @@ impl ModlistDownloadBuilder {
     }
 }
 
-/// Extension trait for EnhancedDownloader to add convenience methods
-pub trait EnhancedDownloaderExt {
-    /// Download a modlist with a fluent API
-    fn modlist<P: AsRef<Path>>(modlist_path: P) -> ModlistDownloadBuilder;
-}
-
-impl EnhancedDownloaderExt for EnhancedDownloader {
-    fn modlist<P: AsRef<Path>>(modlist_path: P) -> ModlistDownloadBuilder {
-        ModlistDownloadBuilder::new(modlist_path)
-    }
-}

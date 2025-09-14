@@ -8,6 +8,6 @@ pub mod progress;
 pub mod request_ext;
 
 // Re-export main convenience APIs
-pub use modlist::{ModlistDownloadBuilder, ModlistOptions, ModlistDownloadResult, EnhancedDownloaderExt};
+pub use modlist::{ModlistDownloader, ModlistOptions, ModlistDownloadResult};
 pub use progress::{DashboardProgressReporter, DashboardStyle};
 pub use request_ext::{DownloadRequestExt, DownloadRequestIteratorExt, DownloadRequestVecExt, RequestSummaryStats};

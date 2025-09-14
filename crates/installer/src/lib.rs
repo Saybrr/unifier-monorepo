@@ -89,10 +89,10 @@ pub mod integrations;
 // Re-export commonly used types for convenience
 pub use downloader::{
     // Core types
-    DownloadRequest, DownloadResult, EnhancedDownloader, ValidationHandle,
+    DownloadRequest, DownloadResult, Downloader, ValidationHandle,
 
     // Configuration
-    DownloadConfig, DownloadConfigBuilder,
+    DownloadConfig,
 
     // Validation
     FileValidation,
@@ -121,7 +121,7 @@ pub use parse_wabbajack::{
 // Re-export high-level convenience APIs (the main improvement!)
 pub use integrations::{
     // Fluent modlist API
-    ModlistDownloadBuilder, ModlistOptions, ModlistDownloadResult, EnhancedDownloaderExt,
+    ModlistDownloader, ModlistOptions, ModlistDownloadResult,
 
     // Built-in progress reporters
     DashboardProgressReporter, DashboardStyle,

@@ -14,7 +14,13 @@ use crate::downloader::core::{
     DownloadRequest, DownloadResult, ProgressCallback, Result,
     DownloadError, ValidationType, ProgressEvent
 };
-use crate::downloader::sources::WabbajackCDNSource;
+
+/// Wabbajack CDN download source
+#[derive(Debug, Clone, PartialEq)]
+pub struct WabbajackCDNSource {
+    /// CDN URL for the file
+    pub url: String,
+}
 
 // WabbajackCDN specific types
 #[derive(Debug, Deserialize)]
@@ -273,5 +279,13 @@ impl WabbajackCDNSource {
         Ok(Some(DownloadResult::AlreadyExists {
             size: metadata.len()
         }))
+    }
+}
+
+impl WabbajackCDNSource {
+    pub fn new<S: Into<String>>(url: S) -> Self {
+        Self {
+            url: url.into(),
+        }
     }
 }

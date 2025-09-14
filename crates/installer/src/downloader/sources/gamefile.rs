@@ -9,7 +9,17 @@ use crate::downloader::core::{
     DownloadRequest, DownloadResult, ProgressCallback, Result,
     DownloadError, ValidationType, ProgressEvent
 };
-use crate::downloader::sources::GameFileSource;
+
+/// Game file copy source
+#[derive(Debug, Clone, PartialEq)]
+pub struct GameFileSource {
+    /// Game identifier (e.g., "SkyrimSpecialEdition")
+    pub game: String,
+    /// Relative path to file within game installation
+    pub file_path: String,
+    /// Expected game version
+    pub game_version: String,
+}
 
 impl GameFileSource {
     pub async fn download(
@@ -315,6 +325,20 @@ impl GameFileSource {
             // Remove invalid file
             fs::remove_file(dest_path).await?;
             Ok(None)
+        }
+    }
+}
+
+impl GameFileSource {
+    pub fn new<S1: Into<String>, S2: Into<String>, S3: Into<String>>(
+        game: S1,
+        file_path: S2,
+        game_version: S3,
+    ) -> Self {
+        Self {
+            game: game.into(),
+            file_path: file_path.into(),
+            game_version: game_version.into(),
         }
     }
 }
