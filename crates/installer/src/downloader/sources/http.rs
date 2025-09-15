@@ -1,17 +1,15 @@
 //! HTTP download source implementation
 
-use futures::StreamExt;
-use reqwest::Client;
 use std::collections::HashMap;
 use std::path::Path;
-use tokio::fs;
-use tokio::io::AsyncWriteExt;
 use tracing::debug;
 
 use crate::downloader::core::{
     DownloadRequest, DownloadResult, ProgressCallback, Result,
     DownloadError, ValidationType, ProgressEvent
 };
+use crate::downloader::core::http::HttpClient;
+use crate::downloader::core::files::check_existing_file;
 
 /// HTTP download source
 #[derive(Debug, Clone, PartialEq)]
@@ -29,19 +27,20 @@ impl HttpSource {
         &self,
         request: &DownloadRequest,
         progress_callback: Option<ProgressCallback>,
-        config: &crate::downloader::config::DownloadConfig,
+        config: &crate::downloader::core::config::DownloadConfig,
     ) -> Result<DownloadResult> {
         let filename = request.get_filename()?;
         let dest_path = request.destination.join(&filename);
 
         debug!("HTTP downloading {} to {}", self.url, dest_path.display());
 
-        // Check existing file first
-        if let Some(result) = self.check_existing_file(&dest_path, &request.validation, progress_callback.clone()).await? {
+        // Check existing file first using common utility
+        if let Some(result) = check_existing_file(&dest_path, &request.validation, progress_callback.clone()).await? {
             return Ok(result);
         }
 
-        let size = self.download_helper(&self.url, &dest_path, progress_callback.clone(), Some(request.expected_size), config).await?;
+        // Download the file using centralized logic
+        let size = self.download_with_mirrors(&dest_path, progress_callback.clone(), Some(request.expected_size), config).await?;
 
         // Validate the downloaded file (only if validation is specified)
         if !request.validation.is_empty() {
@@ -54,7 +53,7 @@ impl HttpSource {
                 },
                 Ok(false) => {
                     // This shouldn't happen as validate_file returns Err for failures
-                    fs::remove_file(&dest_path).await?;
+                    tokio::fs::remove_file(&dest_path).await?;
                     return Err(DownloadError::ValidationFailed {
                         file: dest_path.clone(),
                         validation_type: ValidationType::Size,
@@ -66,7 +65,7 @@ impl HttpSource {
                 Err(e) => {
                     // Log the specific validation error (like SizeMismatch)
                     debug!("HTTP file validation failed with error: {}", e);
-                    fs::remove_file(&dest_path).await?;
+                    tokio::fs::remove_file(&dest_path).await?;
                     return Err(e); // Propagate the specific error (e.g., SizeMismatch)
                 }
             }
@@ -78,236 +77,42 @@ impl HttpSource {
 }
 
 impl HttpSource {
-    /// Get file size from server
-    async fn get_file_size(&self, config: &crate::downloader::config::DownloadConfig) -> Result<Option<u64>> {
-        debug!("Getting file size for: {}", self.url);
-        let client = self.create_client(config)?;
-        let response = client.head(&self.url).send().await?;
-        response.error_for_status_ref()?;
-
-        Ok(response.content_length())
-    }
-
-    /// Create HTTP client with configuration and optional timeout override
-    fn create_client_with_timeout(&self, config: &crate::downloader::config::DownloadConfig, timeout: Option<std::time::Duration>) -> Result<Client> {
-        let timeout = timeout.unwrap_or(config.timeout);
-        let client = Client::builder()
-            .timeout(timeout)
-            .user_agent(&config.user_agent)
-            .build()
-            .map_err(|e| DownloadError::Legacy(format!("Failed to create HTTP client: {}", e)))?;
-
-        Ok(client)
-    }
-
-    /// Create HTTP client with configuration
-    fn create_client(&self, config: &crate::downloader::config::DownloadConfig) -> Result<Client> {
-        self.create_client_with_timeout(config, None)
-    }
-
-    /// Download file with retry logic and exponential backoff
-    async fn download_with_retry(
+    /// Download with mirror fallback support
+    async fn download_with_mirrors(
         &self,
-        url: &str,
         dest_path: &Path,
         progress_callback: Option<ProgressCallback>,
         expected_size: Option<u64>,
-        config: &crate::downloader::config::DownloadConfig,
+        config: &crate::downloader::core::config::DownloadConfig,
     ) -> Result<u64> {
-        let mut last_error = None;
+        debug!("Download: {} to {}", self.url, dest_path.display());
 
-        for attempt in 0..=config.max_retries {
-            if attempt > 0 {
-                // Calculate exponential backoff delay
-                let delay = config.get_retry_delay(attempt - 1);
-                debug!("HTTP retry attempt {} for {} after {:?} delay", attempt, url, delay);
-
-                // Report retry attempt
-                if let Some(ref callback) = progress_callback {
-                    callback(ProgressEvent::RetryAttempt {
-                        url: url.to_string(),
-                        attempt,
-                        max_attempts: config.max_retries,
-                    });
-                }
-
-                tokio::time::sleep(delay).await;
-            }
-
-            match self.download_file(url, dest_path, progress_callback.clone(), expected_size, config).await {
-                Ok(size) => return Ok(size),
-                Err(e) => {
-                    last_error = Some(e);
-                    // Continue to retry for recoverable errors
-                    // TODO: Check if error is recoverable
-                    continue;
-                }
-            }
-        }
-
-        // All retries exhausted
-        Err(last_error.unwrap())
-    }
-
-    /// Download file with resume support and progress tracking
-    async fn download_file(
-        &self,
-        url: &str,
-        dest_path: &Path,
-        progress_callback: Option<ProgressCallback>,
-        expected_size: Option<u64>,
-        config: &crate::downloader::config::DownloadConfig,
-    ) -> Result<u64> {
-        // Use appropriate timeout based on expected file size
+        // Create HTTP client with appropriate timeout
         let timeout = expected_size
             .map(|size| config.get_timeout_for_size(size))
             .unwrap_or(config.timeout);
+        let http_client = HttpClient::with_timeout(config, timeout)?;
 
-        debug!("Using timeout {:?} for file of size {:?}", timeout, expected_size);
-        let client = self.create_client_with_timeout(config, Some(timeout))?;
+        // Try primary URL with built-in retry logic
+        let primary_result = http_client.download_with_retry(&self.url, dest_path, expected_size, progress_callback.clone(), config).await;
 
-        // Check for existing partial file
-        let temp_path = dest_path.with_extension("part");
-        let start_byte = if config.allow_resume && temp_path.exists() {
-            let size = fs::metadata(&temp_path).await?.len();
-            debug!("Found partial file, resuming from byte {}", size);
-            size
-        } else {
-            0
-        };
-
-        // Get file size for progress tracking
-        let mut total_size = if let Some(expected) = expected_size {
-            debug!("Using expected size from validation: {} bytes", expected);
-            Some(expected)
-        } else {
-            debug!("No expected size provided, querying server");
-            self.get_file_size(config).await?
-        };
-
-        // Build request with range header for resume
-        let mut request = client.get(url);
-        if start_byte > 0 {
-            request = request.header("Range", format!("bytes={}-", start_byte));
-            debug!("Requesting range: bytes={}-", start_byte);
-        }
-
-        let response = request.send().await?;
-        response.error_for_status_ref()?;
-
-        // If we didn't get size from HEAD request, try to get it from GET response
-        if total_size.is_none() {
-            total_size = response.content_length();
-            debug!("Got content length from GET response: {:?}", total_size);
-        }
-
-        // Adjust total size if resuming
-        if let Some(size) = total_size {
-            if start_byte > 0 {
-                total_size = Some(start_byte + size);
-            }
-        }
-
-        if let Some(ref callback) = progress_callback {
-            callback(ProgressEvent::DownloadStarted {
-                url: url.to_string(),
-                total_size,
-            });
-        }
-
-        // Open file for writing
-        let mut file = if start_byte > 0 {
-            fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(&temp_path)
-                .await?
-        } else {
-            fs::File::create(&temp_path).await?
-        };
-
-        // Download with progress tracking
-        let mut stream = response.bytes_stream();
-        let mut downloaded = start_byte;
-        let start_time = std::time::Instant::now();
-        let mut last_progress_time = start_time;
-
-        while let Some(chunk_result) = stream.next().await {
-            let chunk = chunk_result?;
-            file.write_all(&chunk).await?;
-            downloaded += chunk.len() as u64;
-
-            // Report progress at most every 100ms to avoid spam
-            let now = std::time::Instant::now();
-            if now.duration_since(last_progress_time).as_millis() >= 100 {
-                if let Some(ref callback) = progress_callback {
-                    let elapsed = start_time.elapsed().as_secs_f64();
-                    let speed = if elapsed > 0.0 {
-                        (downloaded - start_byte) as f64 / elapsed
-                    } else {
-                        0.0
-                    };
-
-                    callback(ProgressEvent::DownloadProgress {
-                        url: url.to_string(),
-                        downloaded,
-                        total: total_size,
-                        speed_bps: speed,
-                    });
-                }
-                last_progress_time = now;
-            }
-        }
-
-        file.flush().await?;
-        file.sync_all().await?; // Ensure file is fully written to disk before rename
-
-        // Move temp file to final destination
-        fs::rename(&temp_path, dest_path).await?;
-
-        if let Some(ref callback) = progress_callback {
-            callback(ProgressEvent::DownloadComplete {
-                url: url.to_string(),
-                final_size: downloaded,
-            });
-        }
-
-        debug!("Download completed: {} bytes", downloaded);
-        Ok(downloaded)
-    }
-
-    /// Download helper method
-    async fn download_helper(
-        &self,
-        url: &str,
-        dest_path: &Path,
-        progress_callback: Option<ProgressCallback>,
-        expected_size: Option<u64>,
-        config: &crate::downloader::config::DownloadConfig,
-    ) -> Result<u64> {
-        debug!("Download: {} to {}", url, dest_path.display());
-
-        // Create destination directory if it doesn't exist
-        if let Some(parent) = dest_path.parent() {
-            fs::create_dir_all(parent).await?;
-            debug!("Created directory: {}", parent.display());
-        }
-
-        // Try primary URL with retry logic
-        match self.download_with_retry(url, dest_path, progress_callback.clone(), expected_size, config).await {
+        match primary_result {
             Ok(size) => return Ok(size),
             Err(e) => {
                 // Report warning through progress callback
                 if let Some(ref callback) = progress_callback {
                     callback(ProgressEvent::Warning {
-                        url: url.to_string(),
+                        url: self.url.clone(),
                         message: format!("Primary URL failed after {} retries: {}", config.max_retries, e),
                     });
                 }
+
                 // Try mirror URLs if primary fails
                 for mirror_url in &self.mirror_urls {
                     debug!("Trying mirror URL: {}", mirror_url);
-                    match self.download_with_retry(mirror_url, dest_path, progress_callback.clone(), expected_size, config).await {
+                    let mirror_result = http_client.download_with_retry(mirror_url, dest_path, expected_size, progress_callback.clone(), config).await;
+
+                    match mirror_result {
                         Ok(size) => return Ok(size),
                         Err(mirror_error) => {
                             // Report mirror failure warning
@@ -325,37 +130,6 @@ impl HttpSource {
                 return Err(e);
             }
         }
-    }
-
-    /// Check if file exists and handle validation if needed
-    async fn check_existing_file(
-        &self,
-        dest_path: &Path,
-        validation: &crate::downloader::core::FileValidation,
-        progress_callback: Option<ProgressCallback>,
-    ) -> Result<Option<DownloadResult>> {
-        if dest_path.exists() {
-            let size = fs::metadata(dest_path).await?.len();
-
-            if validation.is_empty() {
-                // No validation needed, file exists
-                debug!("File exists and no validation required");
-                return Ok(Some(DownloadResult::AlreadyExists { size }));
-            } else if validation.validate_file(dest_path, progress_callback.clone()).await? {
-                debug!("File exists and is valid");
-                return Ok(Some(DownloadResult::AlreadyExists { size }));
-            } else {
-                // Report warning through progress callback
-                if let Some(ref callback) = progress_callback {
-                    callback(ProgressEvent::Warning {
-                        url: self.url.clone(),
-                        message: format!("Existing file is invalid, removing: {}", dest_path.display()),
-                    });
-                }
-                fs::remove_file(dest_path).await?;
-            }
-        }
-        Ok(None)
     }
 }
 

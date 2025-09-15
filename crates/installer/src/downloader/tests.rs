@@ -15,6 +15,9 @@ use wiremock::{
     Mock, MockServer, ResponseTemplate,
 };
 
+use crate::downloader::core::{DownloadConfig, DownloadMetrics};
+
+
 /// Helper struct to capture progress events during testing
 #[derive(Debug, Default)]
 struct ProgressCapture {

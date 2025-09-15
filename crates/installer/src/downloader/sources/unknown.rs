@@ -25,7 +25,7 @@ impl UnknownSource {
         }
     }
 
-    pub async fn download(&self, _request: &DownloadRequest, _progress_callback: Option<ProgressCallback>, _config: &crate::downloader::config::DownloadConfig) -> Result<DownloadResult> {
+    pub async fn download(&self, _request: &DownloadRequest, _progress_callback: Option<ProgressCallback>, _config: &crate::downloader::core::config::DownloadConfig) -> Result<DownloadResult> {
         let mut reason = format!("Unknown download type: '{}'", self.source_type);
 
         if let Some(ref name) = self.archive_name {

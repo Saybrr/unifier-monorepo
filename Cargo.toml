@@ -1,7 +1,6 @@
 [workspace]
 members = [
     "apps/cli",
-    "apps/Unifier/src-tauri", "crates/installer", "crates/installer-v2",
-    "apps/unifier-tui",
+    "apps/Unifier/src-tauri", "crates/installer",
 ]
 resolver = "2"

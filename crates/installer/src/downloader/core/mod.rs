@@ -6,11 +6,17 @@
 pub mod error;
 pub mod validation;
 pub mod progress;
+pub mod config;
+pub mod metrics;
+pub mod http;
+pub mod files;
 
 // Re-export main types for convenience
 pub use error::{DownloadError, Result, ErrorSeverity, FileOperation, ValidationType, ErrorContext};
 pub use validation::{FileValidation, ValidationHandle, ValidationPool};
 pub use progress::{ProgressEvent, ProgressCallback, ProgressReporter, IntoProgressCallback, ConsoleProgressReporter, NullProgressReporter, CompositeProgressReporter};
+pub use config::DownloadConfig;
+pub use metrics::{DownloadMetrics, DownloadMetricsSnapshot, BatchDownloadResult};
 
 use std::path::PathBuf;
 

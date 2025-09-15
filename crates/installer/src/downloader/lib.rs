@@ -16,9 +16,7 @@
 //! Core types (core/*)
 
 use crate::downloader::{
-    config::DownloadConfig,
-    core::{DownloadRequest, DownloadResult, ProgressCallback, Result, ValidationPool, DownloadSource},
-    batch::{DownloadMetrics},
+    core::{DownloadRequest, DownloadResult, ProgressCallback, Result, ValidationPool, DownloadSource, DownloadConfig, DownloadMetrics},
 };
 use std::sync::Arc;
 

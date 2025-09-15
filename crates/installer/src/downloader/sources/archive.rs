@@ -19,7 +19,7 @@ impl ArchiveSource {
         &self,
         _request: &DownloadRequest,
         _progress_callback: Option<ProgressCallback>,
-        _config: &crate::downloader::config::DownloadConfig,
+        _config: &crate::downloader::core::config::DownloadConfig,
     ) -> Result<DownloadResult> {
         Err(DownloadError::Legacy(
             "Archive extraction not yet implemented in new architecture".to_string()

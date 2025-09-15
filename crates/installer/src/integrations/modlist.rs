@@ -4,9 +4,9 @@
 
 use std::path::PathBuf;
 use crate::{
-    Downloader, DownloadConfig, ProgressCallback,
     ModlistParser, Result, DownloadError
 };
+use crate::downloader::{Downloader, DownloadConfig, ProgressCallback};
 use crate::integrations::progress::DashboardProgressReporter;
 use crate::IntoProgressCallback;
 

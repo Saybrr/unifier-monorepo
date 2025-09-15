@@ -26,7 +26,7 @@ impl GameFileSource {
         &self,
         request: &DownloadRequest,
         progress_callback: Option<ProgressCallback>,
-        _config: &crate::downloader::config::DownloadConfig,
+        _config: &crate::downloader::core::config::DownloadConfig,
     ) -> Result<DownloadResult> {
         let filename = request.get_filename()?;
         let dest_path = request.destination.join(&filename);

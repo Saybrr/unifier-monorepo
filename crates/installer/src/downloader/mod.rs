@@ -4,8 +4,6 @@
 //! core types, configuration, sources, and batch operations.
 
 pub mod core;
-pub mod config;
-pub mod batch;
 pub mod sources;
 pub mod api;
 pub mod r#lib;
@@ -18,9 +16,8 @@ pub use core::{
     ConsoleProgressReporter, NullProgressReporter, CompositeProgressReporter,
     FileValidation, ValidationHandle, ValidationPool,
     DownloadError, Result, ErrorSeverity, FileOperation, ValidationType, ErrorContext,
+    DownloadConfig, DownloadMetrics, DownloadMetricsSnapshot, BatchDownloadResult,
 };
-pub use config::{DownloadConfig};
-pub use batch::{DownloadMetrics, DownloadMetricsSnapshot, BatchDownloadResult};
 
 // Re-export source types
 pub use sources::{

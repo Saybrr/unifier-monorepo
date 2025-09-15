@@ -91,8 +91,7 @@ pub use downloader::{
     // Core types
     DownloadRequest, DownloadResult, Downloader, ValidationHandle,
 
-    // Configuration
-    DownloadConfig,
+
 
     // Validation
     FileValidation,
@@ -101,8 +100,6 @@ pub use downloader::{
     ProgressCallback, ProgressEvent, ProgressReporter, IntoProgressCallback,
     ConsoleProgressReporter, NullProgressReporter, CompositeProgressReporter,
 
-    // Batch operations and metrics
-    BatchDownloadResult, DownloadMetrics, DownloadMetricsSnapshot,
 
     // Error handling
     DownloadError, Result, ErrorSeverity, FileOperation, ValidationType, ErrorContext,
