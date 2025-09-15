@@ -22,10 +22,10 @@ unifier/
 ```
 
 ## Running
-- using Developer Powershell for Visual Studio 2022
+- using Developer Powershell for Visual Studio 2022 OR from opening your ide from Dev Powershell
 - CLI:  `cargo run -p cli`
   - Command inputs can be given by `...cli -- --input "hello"`
-- Unifier Client: from `apps/unifier-client` - `awesome-app dev`
+- Unifier Client: from `apps/unifier-client` - `bun run --bun tauri dev`
 
 
 ## Testing
