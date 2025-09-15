@@ -4,6 +4,7 @@
 //! a Wabbajack modlist and can be processed by the downloader system.
 
 use crate::downloader::sources::DownloadSource;
+use crate::parse_wabbajack::parser::Directive;
 
 /// A complete download operation with all metadata
 ///
@@ -52,6 +53,8 @@ pub struct ArchiveManifest {
     pub metadata: ManifestMetadata,
     /// Request statistics
     pub stats: ManifestStats,
+    /// Directives to perform
+    pub directives: Vec<Directive>,
 }
 
 /// Metadata about the entire manifest
@@ -88,6 +91,8 @@ pub struct ManifestStats {
     pub user_interaction_required: usize,
     /// Operations requiring external dependencies
     pub external_dependencies_required: usize,
+    /// Total number of directives
+    pub directives: usize,
 }
 
 impl DownloadOperation {
@@ -142,12 +147,17 @@ impl ArchiveManifest {
             requests: Vec::new(),
             metadata: ManifestMetadata::default(),
             stats: ManifestStats::default(),
+            directives: Vec::new(),
         }
     }
 
     /// Add a request to the manifest
     pub fn add_request(&mut self, request: crate::downloader::core::DownloadRequest) {
         self.requests.push(request);
+        self.update_stats();
+    }
+    pub fn add_directive(&mut self, directive: Directive) {
+        self.directives.push(directive);
         self.update_stats();
     }
 
@@ -184,6 +194,7 @@ impl ArchiveManifest {
                 stats.external_dependencies_required += 1;
             }
         }
+        stats.directives = self.directives.len();
 
         self.stats = stats;
     }

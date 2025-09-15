@@ -16,6 +16,8 @@ use std::path::PathBuf;
 pub struct RawModlist {
     #[serde(rename = "Archives")]
     pub archives: Vec<RawArchive>,
+    #[serde(rename = "Directives")]
+    pub directives: Vec<Directive>,
     #[serde(rename = "Name", default)]
     pub name: String,
     #[serde(rename = "Version", default)]
@@ -26,6 +28,264 @@ pub struct RawModlist {
     pub game: String,
     #[serde(rename = "Description", default)]
     pub description: String,
+}
+
+/// Raw directive entry from the JSON
+#[derive(Debug, Deserialize, Clone)]
+#[serde(tag = "$type")]
+pub enum Directive {
+    /// Extract a file directly from a downloaded archive
+    #[serde(rename = "FromArchive")]
+    FromArchive {
+        #[serde(rename = "To")]
+        to: String,
+        #[serde(rename = "Hash")]
+        hash: String,
+        #[serde(rename = "Size")]
+        size: u64,
+        #[serde(rename = "ArchiveHashPath")]
+        archive_hash_path: Vec<String>, // [archive_hash, path, components...]
+    },
+
+    /// Extract a file from archive and apply a binary patch
+    #[serde(rename = "PatchedFromArchive")]
+    PatchedFromArchive {
+        #[serde(rename = "To")]
+        to: String,
+        #[serde(rename = "Hash")]
+        hash: String,
+        #[serde(rename = "Size")]
+        size: u64,
+        #[serde(rename = "ArchiveHashPath")]
+        archive_hash_path: Vec<String>,
+        #[serde(rename = "FromHash")]
+        from_hash: String,
+        #[serde(rename = "PatchID")]
+        patch_id: String,
+    },
+
+    /// Write embedded data directly to the destination
+    #[serde(rename = "InlineFile")]
+    InlineFile {
+        #[serde(rename = "To")]
+        to: String,
+        #[serde(rename = "Hash")]
+        hash: String,
+        #[serde(rename = "Size")]
+        size: u64,
+        #[serde(rename = "SourceDataID")]
+        source_data_id: String,
+    },
+
+    /// Write embedded data with path placeholder replacement
+    #[serde(rename = "RemappedInlineFile")]
+    RemappedInlineFile {
+        #[serde(rename = "To")]
+        to: String,
+        #[serde(rename = "Hash")]
+        hash: String,
+        #[serde(rename = "Size")]
+        size: u64,
+        #[serde(rename = "SourceDataID")]
+        source_data_id: String,
+    },
+
+    /// Extract texture and apply format/compression changes
+    #[serde(rename = "TransformedTexture")]
+    TransformedTexture {
+        #[serde(rename = "To")]
+        to: String,
+        #[serde(rename = "Hash")]
+        hash: String,
+        #[serde(rename = "Size")]
+        size: u64,
+        #[serde(rename = "ArchiveHashPath")]
+        archive_hash_path: Vec<String>,
+        #[serde(rename = "ImageState")]
+        image_state: serde_json::Value, // Complex object, use Value for now
+    },
+
+    /// Build BSA/BA2 archive files from loose files
+    #[serde(rename = "CreateBSA")]
+    CreateBSA {
+        #[serde(rename = "To")]
+        to: String,
+        #[serde(rename = "Hash")]
+        hash: String,
+        #[serde(rename = "Size")]
+        size: u64,
+        #[serde(rename = "TempID")]
+        temp_id: String,
+        #[serde(rename = "State")]
+        state: serde_json::Value, // Archive format configuration
+        #[serde(rename = "FileStates")]
+        file_states: Vec<serde_json::Value>, // Array of file states
+    },
+
+    /// Create merged plugin files (like zEdit merges)
+    #[serde(rename = "MergedPatch")]
+    MergedPatch {
+        #[serde(rename = "To")]
+        to: String,
+        #[serde(rename = "Hash")]
+        hash: String,
+        #[serde(rename = "Size")]
+        size: u64,
+        #[serde(rename = "PatchID")]
+        patch_id: String,
+        #[serde(rename = "Sources")]
+        sources: Vec<SourcePatch>,
+    },
+
+    /// Modlist metadata files (banner, readme)
+    #[serde(rename = "PropertyFile")]
+    PropertyFile {
+        #[serde(rename = "To")]
+        to: String,
+        #[serde(rename = "Hash")]
+        hash: String,
+        #[serde(rename = "Size")]
+        size: u64,
+        #[serde(rename = "SourceDataID")]
+        source_data_id: String,
+        #[serde(rename = "Type")]
+        property_type: PropertyType,
+    },
+
+    /// Create .meta files for Mod Organizer 2
+    #[serde(rename = "ArchiveMeta")]
+    ArchiveMeta {
+        #[serde(rename = "To")]
+        to: String,
+        #[serde(rename = "Hash")]
+        hash: String,
+        #[serde(rename = "Size")]
+        size: u64,
+        #[serde(rename = "SourceDataID")]
+        source_data_id: String,
+    },
+
+    /// Files explicitly ignored during compilation (shouldn't appear in final modlist)
+    #[serde(rename = "IgnoredDirectly")]
+    IgnoredDirectly {
+        #[serde(rename = "To")]
+        to: String,
+        #[serde(rename = "Hash")]
+        hash: String,
+        #[serde(rename = "Size")]
+        size: u64,
+        #[serde(rename = "Reason")]
+        reason: String,
+    },
+
+    /// Files that couldn't be matched during compilation (shouldn't appear in final modlist)
+    #[serde(rename = "NoMatch")]
+    NoMatch {
+        #[serde(rename = "To")]
+        to: String,
+        #[serde(rename = "Hash")]
+        hash: String,
+        #[serde(rename = "Size")]
+        size: u64,
+        #[serde(rename = "Reason")]
+        reason: String,
+    },
+}
+
+/// Source patch information for merged patches
+#[derive(Debug, Deserialize, Clone)]
+pub struct SourcePatch {
+    #[serde(rename = "Hash")]
+    pub hash: String,
+    #[serde(rename = "RelativePath")]
+    pub relative_path: String,
+}
+
+/// Property file types
+#[derive(Debug, Deserialize, Clone)]
+pub enum PropertyType {
+    Banner,
+    Readme,
+}
+
+impl Directive {
+    /// Get the destination path for any directive type
+    pub fn to(&self) -> &str {
+        match self {
+            Directive::FromArchive { to, .. } => to,
+            Directive::PatchedFromArchive { to, .. } => to,
+            Directive::InlineFile { to, .. } => to,
+            Directive::RemappedInlineFile { to, .. } => to,
+            Directive::TransformedTexture { to, .. } => to,
+            Directive::CreateBSA { to, .. } => to,
+            Directive::MergedPatch { to, .. } => to,
+            Directive::PropertyFile { to, .. } => to,
+            Directive::ArchiveMeta { to, .. } => to,
+            Directive::IgnoredDirectly { to, .. } => to,
+            Directive::NoMatch { to, .. } => to,
+        }
+    }
+
+    /// Get the content hash for any directive type
+    pub fn hash(&self) -> &str {
+        match self {
+            Directive::FromArchive { hash, .. } => hash,
+            Directive::PatchedFromArchive { hash, .. } => hash,
+            Directive::InlineFile { hash, .. } => hash,
+            Directive::RemappedInlineFile { hash, .. } => hash,
+            Directive::TransformedTexture { hash, .. } => hash,
+            Directive::CreateBSA { hash, .. } => hash,
+            Directive::MergedPatch { hash, .. } => hash,
+            Directive::PropertyFile { hash, .. } => hash,
+            Directive::ArchiveMeta { hash, .. } => hash,
+            Directive::IgnoredDirectly { hash, .. } => hash,
+            Directive::NoMatch { hash, .. } => hash,
+        }
+    }
+
+    /// Get the file size for any directive type
+    pub fn size(&self) -> u64 {
+        match self {
+            Directive::FromArchive { size, .. } => *size,
+            Directive::PatchedFromArchive { size, .. } => *size,
+            Directive::InlineFile { size, .. } => *size,
+            Directive::RemappedInlineFile { size, .. } => *size,
+            Directive::TransformedTexture { size, .. } => *size,
+            Directive::CreateBSA { size, .. } => *size,
+            Directive::MergedPatch { size, .. } => *size,
+            Directive::PropertyFile { size, .. } => *size,
+            Directive::ArchiveMeta { size, .. } => *size,
+            Directive::IgnoredDirectly { size, .. } => *size,
+            Directive::NoMatch { size, .. } => *size,
+        }
+    }
+
+    /// Check if this directive requires VFS (archive-based installation)
+    pub fn requires_vfs(&self) -> bool {
+        matches!(self,
+            Directive::FromArchive { .. } |
+            Directive::PatchedFromArchive { .. } |
+            Directive::TransformedTexture { .. }
+        )
+    }
+
+    /// Check if this directive is an inline file (embedded data)
+    pub fn is_inline(&self) -> bool {
+        matches!(self,
+            Directive::InlineFile { .. } |
+            Directive::RemappedInlineFile { .. } |
+            Directive::PropertyFile { .. } |
+            Directive::ArchiveMeta { .. }
+        )
+    }
+
+    /// Check if this directive should be processed during installation
+    pub fn should_install(&self) -> bool {
+        !matches!(self,
+            Directive::IgnoredDirectly { .. } |
+            Directive::NoMatch { .. }
+        )
+    }
 }
 
 /// Raw archive entry from the JSON
@@ -149,6 +409,11 @@ impl ModlistParser {
                     eprintln!("Warning: Failed to convert archive '{}': {}", archive.name, e);
                 }
             }
+        }
+
+        // Convert directives to requests
+        for directive in raw_modlist.directives.iter() {
+                manifest.add_directive(directive.clone());
         }
 
         Ok(manifest)
