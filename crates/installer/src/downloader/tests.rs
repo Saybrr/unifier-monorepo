@@ -133,9 +133,10 @@ mod file_validation_tests {
     async fn test_file_validation_size_success() {
         let test_data = b"Hello, World!";
         let expected_size = test_data.len() as u64;
+        let expected_hash = calculate_xxhash64_base64(test_data);
         let (_temp_dir, file_path) = create_test_file(test_data).await;
 
-        let validation = FileValidation::new("dGVzdA==".to_string(), expected_size);
+        let validation = FileValidation::new(expected_hash, expected_size);
 
         let result = validation.validate_file(&file_path, None).await;
 
@@ -231,10 +232,10 @@ mod download_request_tests {
 
     #[test]
     fn test_download_request_get_filename_from_url() {
-        // With trait objects, filename extraction is not reliable, so we test the fallback behavior
+        // Test that get_filename returns the explicit filename passed to the constructor
         let request = DownloadRequest::new_http("https://example.com/path/file.txt", "/tmp", "file.txt", 1024, "dGVzdA==".to_string());
         let filename = request.get_filename().unwrap();
-        assert_eq!(filename, "downloaded_file"); // Fallback name with trait objects
+        assert_eq!(filename, "file.txt"); // Returns the explicit filename
     }
 
     #[test]
@@ -298,7 +299,8 @@ mod http_downloader_tests {
         let temp_dir = tempdir().unwrap();
         let url = format!("{}/test-file.txt", mock_server.uri());
 
-        let request = DownloadRequest::new_http(url, temp_dir.path(), "test-file.txt", test_content.len() as u64, "dGVzdA==".to_string());
+        let expected_hash = calculate_xxhash64_base64(test_content);
+        let request = DownloadRequest::new_http(url, temp_dir.path(), "test-file.txt", test_content.len() as u64, expected_hash);
 
         let config = DownloadConfig::default();
         let downloader = Downloader::new(config);
@@ -338,7 +340,8 @@ mod http_downloader_tests {
         // Pre-create the file
         tokio::fs::write(&file_path, test_content).await.unwrap();
 
-        let request = DownloadRequest::new_http("https://example.com/file.txt", temp_dir.path(), "existing-file.txt", test_content.len() as u64, "dGVzdA==".to_string());
+        let expected_hash = calculate_xxhash64_base64(test_content);
+        let request = DownloadRequest::new_http("https://example.com/file.txt", temp_dir.path(), "existing-file.txt", test_content.len() as u64, expected_hash);
 
         let config = DownloadConfig::default();
         let downloader = Downloader::new(config);
@@ -381,7 +384,7 @@ mod http_downloader_tests {
         let url = format!("{}/test-file.txt", mock_server.uri());
 
         // Use wrong hash to force validation failure
-        let request = DownloadRequest::new_http(url, temp_dir.path(), "test-file.txt", 1024, "AAAAAAAAAA8=".to_string());
+        let request = DownloadRequest::new_http(url, temp_dir.path(), "test-file.txt", test_content.len() as u64, "AAAAAAAAAA8=".to_string());
 
         let config = DownloadConfig::default();
         let downloader = Downloader::new(config);
@@ -468,7 +471,8 @@ mod enhanced_downloader_tests {
         let (_mock_server, url) = setup_mock_server_with_content(test_content).await;
 
         let temp_dir = tempdir().unwrap();
-        let request = DownloadRequest::new_http(url, temp_dir.path(), "enhanced-test.txt", test_content.len() as u64, "dGVzdA==".to_string());
+        let expected_hash = calculate_xxhash64_base64(test_content);
+        let request = DownloadRequest::new_http(url, temp_dir.path(), "enhanced-test.txt", test_content.len() as u64, expected_hash);
 
         let config = DownloadConfig::default();
         let downloader = Downloader::new(config);
@@ -487,7 +491,7 @@ mod enhanced_downloader_tests {
         }
 
         // Verify file content
-        let file_path = temp_dir.path().join("test-file.txt");
+        let file_path = temp_dir.path().join("enhanced-test.txt");
         let downloaded_content = tokio::fs::read(&file_path).await.unwrap();
         assert_eq!(downloaded_content, test_content);
 
@@ -558,9 +562,11 @@ mod enhanced_downloader_tests {
 
         let temp_dir = tempdir().unwrap();
 
+        let expected_hash_1 = calculate_xxhash64_base64(test_content_1);
+        let expected_hash_2 = calculate_xxhash64_base64(test_content_2);
         let requests = vec![
-            DownloadRequest::new_http(url1, temp_dir.path(), "file1.txt", test_content_1.len() as u64, "dGVzdA==".to_string()),
-            DownloadRequest::new_http(url2, temp_dir.path(), "file2.txt", test_content_2.len() as u64, "dGVzdA==".to_string()),
+            DownloadRequest::new_http(url1, temp_dir.path(), "file1.txt", test_content_1.len() as u64, expected_hash_1),
+            DownloadRequest::new_http(url2, temp_dir.path(), "file2.txt", test_content_2.len() as u64, expected_hash_2),
         ];
 
         let config = DownloadConfig::default();
