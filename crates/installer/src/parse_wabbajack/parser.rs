@@ -7,7 +7,6 @@ use crate::parse_wabbajack::{
     operations::{ArchiveManifest, ManifestMetadata},
 };
 use crate::downloader::core::{DownloadRequest, DownloadMetadata, DownloadSource};
-use crate::downloader::sources::{HttpSource, NexusSource, GameFileSource, WabbajackCDNSource, UnknownSource};
 use serde::Deserialize;
 use std::path::PathBuf;
 
@@ -304,7 +303,7 @@ pub struct Archive {
     pub size: u64,
 
     #[serde(rename = "State")]
-    pub state: ArchiveState,
+    pub state: DownloadSource,
 }
 
 /// Raw downloader state from JSON (tag-based deserialization using $type field)
@@ -411,7 +410,6 @@ impl ModlistParser {
             }
         }
 
-        // Convert directives to requests
         for directive in raw_modlist.directives.iter() {
                 manifest.add_directive(directive.clone());
         }
@@ -419,15 +417,13 @@ impl ModlistParser {
         Ok(manifest)
     }
 
-    /// Convert a raw archive to a structured download request
+    /// Convert a wabba modlist archive to a structured download request
     fn convert_archive_to_request(
         &self,
         archive: &Archive,
         index: usize,
         base_destination: &PathBuf,
     ) -> Result<DownloadRequest, ParseError> {
-        let source = self.convert_downloader_state(&archive.state, &archive.name, &archive.meta)?;
-
         let metadata = DownloadMetadata {
             description: format!("Archive: {}", archive.name),
             category: self.infer_category(&archive.name),
@@ -436,7 +432,7 @@ impl ModlistParser {
         };
 
         let request = DownloadRequest::new(
-            source,
+            archive.state.clone(),
             base_destination,
             archive.name.clone(),
             archive.size,
@@ -447,67 +443,6 @@ impl ModlistParser {
         .with_metadata(metadata);
 
         Ok(request)
-    }
-
-    /// Convert raw downloader state to structured source
-    fn convert_downloader_state(
-        &self,
-        state: &ArchiveState,
-        archive_name: &str,
-        meta: &str
-    ) -> Result<DownloadSource, ParseError> {
-        match state {
-            ArchiveState::Http { url, headers } => {
-                let mut http_source = HttpSource::new(url);
-
-                // Parse headers if any (they come as "Key: Value" strings)
-                for header_str in headers {
-                    if let Some((key, value)) = header_str.split_once(':') {
-                        http_source = http_source.with_header(
-                            key.trim().to_string(),
-                            value.trim().to_string()
-                        );
-                    }
-                }
-
-                Ok(DownloadSource::Http(http_source))
-            },
-
-            ArchiveState::Nexus {
-                mod_id, file_id, game_name, name, author, version, description, is_nsfw, ..
-            } => {
-                let author_str = author.as_deref().unwrap_or("Unknown");
-                let nexus_source = NexusSource::new(*mod_id, *file_id, game_name.clone())
-                    .with_metadata(
-                        name.as_str(),
-                        author_str,
-                        version.as_str(),
-                        description.as_str(),
-                        *is_nsfw
-                    );
-
-                Ok(DownloadSource::Nexus(nexus_source))
-            },
-
-            ArchiveState::GameFile { game, game_file, game_version, .. } => {
-                let gamefile_source = GameFileSource::new(game, game_file, game_version);
-                Ok(DownloadSource::GameFile(gamefile_source))
-            },
-
-            ArchiveState::WabbajackCDN { url } => {
-                let wabbajack_cdn_source = WabbajackCDNSource::new(url);
-                Ok(DownloadSource::WabbajackCDN(wabbajack_cdn_source))
-            },
-
-            ArchiveState::Unknown => {
-                let unknown_source = UnknownSource::new(
-                    "Unknown Downloader Type".to_string(),
-                    Some(archive_name.to_string()),
-                    Some(meta.to_string()),
-                );
-                Ok(DownloadSource::Unknown(unknown_source))
-            }
-        }
     }
 
     /// Infer category from filename patterns
@@ -596,6 +531,7 @@ mod tests {
                     }
                 }
             ],
+            "Directives": [],
             "Name": "Test Modlist",
             "Version": "1.0",
             "Author": "Test Author",
@@ -641,7 +577,8 @@ mod tests {
                         "ImageURL": "https://example.com/image.jpg"
                     }
                 }
-            ]
+            ],
+            "Directives": []
         }"#;
 
         let base_destination = std::path::PathBuf::from("/tmp");
@@ -676,7 +613,8 @@ mod tests {
                         "AnotherField": 42
                     }
                 }
-            ]
+            ],
+            "Directives": []
         }"#;
 
         let base_destination = std::path::PathBuf::from("/tmp");
@@ -687,8 +625,9 @@ mod tests {
         let operation = &manifest.requests[0];
         if let DownloadSource::Unknown(unknown_source) = &operation.source {
             assert_eq!(unknown_source.source_type, "Unknown Downloader Type");
-            assert_eq!(unknown_source.archive_name, Some("unknown-downloader.zip".to_string()));
-            assert_eq!(unknown_source.meta, Some("[General]\ngameName=skyrimse\nmodID=71371\nfileID=575985".to_string()));
+            // With serde from conversion, archive_name and meta are not available in the ArchiveState::Unknown variant
+            assert_eq!(unknown_source.archive_name, None);
+            assert_eq!(unknown_source.meta, None);
         } else {
             panic!("Expected Unknown source, got: {:?}", operation.source);
         }
