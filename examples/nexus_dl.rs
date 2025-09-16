@@ -23,14 +23,15 @@
 use installer::{
     downloader::api::nexus_api::NexusAPI,
     downloader::sources::DownloadSource,
-    ModlistParser,
     Result
 };
 use std::path::PathBuf;
+use std::str::FromStr;
 use tracing_subscriber;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
 use installer::downloader::core::DownloadError;
+use installer::parse_wabbajack::parser::WabbaModlist;
 
 
 #[tokio::main]
@@ -99,10 +100,10 @@ async fn main() -> Result<()> {
     "#;
 
     // parse the modlist
-    let manifest = ModlistParser::new().parse(skse_json, &PathBuf::from("./examples/downloads/nexus_dl")).expect("Failed to parse skse manifest");
-
+    let manifest = WabbaModlist::parse(skse_json).expect("Failed to prse skse manifest");
+    let requests = manifest.get_dl_requests(&PathBuf::from_str("/tmp").unwrap()).expect("Failed to get download requests");
     // call nexus api
-    for request in manifest.requests {
+    for request in requests {
         println!("Starting download...");
         println!("Mod: {} ", request.source.description());
         println!("Destination: {}", request.destination.display());
