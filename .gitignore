@@ -2,6 +2,9 @@
 multifiledownloader-rs/
 /NolvusDashboard/*
 /NolvusDashboard
-downloads/
+downloads/*
+/downloads
+w
 wabbajack/
 .env
+examples/downloads/*
