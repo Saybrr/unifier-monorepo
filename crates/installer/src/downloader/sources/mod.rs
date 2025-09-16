@@ -17,12 +17,12 @@ pub mod wabbajack_cdn;
 
 // Re-export the main enum and all individual types for cleaner imports
 pub use unknown::UnknownSource;
-pub use http::HttpSource;
-pub use nexus::NexusSource;
-pub use gamefile::GameFileSource;
+pub use http::{HttpSource, HttpArchiveState};
+pub use nexus::{NexusSource, NexusArchiveState};
+pub use gamefile::{GameFileSource, GameFileArchiveState};
 pub use manual::ManualSource;
 pub use archive::ArchiveSource;
-pub use wabbajack_cdn::WabbajackCDNSource;
+pub use wabbajack_cdn::{WabbajackCDNSource, WabbajackCDNArchiveState};
 
 
 /// Structured representation of a download source
@@ -100,11 +100,11 @@ impl From<crate::parse_wabbajack::parser::ArchiveState> for DownloadSource {
         use crate::parse_wabbajack::parser::ArchiveState;
 
         match state {
-            ArchiveState::Http { url, headers } => {
-                let mut http_source = HttpSource::new(&url);
+            ArchiveState::Http(http_state) => {
+                let mut http_source = HttpSource::new(&http_state.url);
 
                 // Parse headers if any (they come as "Key: Value" strings)
-                for header_str in &headers {
+                for header_str in &http_state.headers {
                     if let Some((key, value)) = header_str.split_once(':') {
                         http_source = http_source.with_header(
                             key.trim().to_string(),
@@ -116,29 +116,27 @@ impl From<crate::parse_wabbajack::parser::ArchiveState> for DownloadSource {
                 DownloadSource::Http(http_source)
             },
 
-            ArchiveState::Nexus {
-                mod_id, file_id, game_name, name, author, version, description, is_nsfw, ..
-            } => {
-                let author_str = author.as_deref().unwrap_or("Unknown").to_string();
-                let nexus_source = NexusSource::new(mod_id, file_id, game_name)
+            ArchiveState::Nexus(nexus_state) => {
+                let author_str = nexus_state.author.as_deref().unwrap_or("Unknown").to_string();
+                let nexus_source = NexusSource::new(nexus_state.mod_id, nexus_state.file_id, nexus_state.game_name)
                     .with_metadata(
-                        name,
+                        nexus_state.name,
                         author_str,
-                        version,
-                        description,
-                        is_nsfw
+                        nexus_state.version,
+                        nexus_state.description,
+                        nexus_state.is_nsfw
                     );
 
                 DownloadSource::Nexus(nexus_source)
             },
 
-            ArchiveState::GameFile { game, game_file, game_version, .. } => {
-                let gamefile_source = GameFileSource::new(&game, &game_file, &game_version);
+            ArchiveState::GameFile(gamefile_state) => {
+                let gamefile_source = GameFileSource::new(&gamefile_state.game, &gamefile_state.game_file, &gamefile_state.game_version);
                 DownloadSource::GameFile(gamefile_source)
             },
 
-            ArchiveState::WabbajackCDN { url } => {
-                let wabbajack_cdn_source = WabbajackCDNSource::new(&url);
+            ArchiveState::WabbajackCDN(wabbajack_cdn_state) => {
+                let wabbajack_cdn_source = WabbajackCDNSource::new(&wabbajack_cdn_state.url);
                 DownloadSource::WabbajackCDN(wabbajack_cdn_source)
             },
 

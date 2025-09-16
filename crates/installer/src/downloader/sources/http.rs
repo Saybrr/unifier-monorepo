@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 use tracing::debug;
+use serde::Deserialize;
 
 use crate::downloader::core::{
     DownloadRequest, DownloadResult, ProgressCallback, Result,
@@ -10,6 +11,15 @@ use crate::downloader::core::{
 };
 use crate::downloader::core::http::HttpClient;
 use crate::downloader::core::files::check_existing_file;
+
+/// Raw HTTP archive state from JSON parsing
+#[derive(Debug, Deserialize, Clone)]
+pub struct HttpArchiveState {
+    #[serde(rename = "Url")]
+    pub url: String,
+    #[serde(rename = "Headers", default)]
+    pub headers: Vec<String>,
+}
 
 /// HTTP download source
 #[derive(Debug, Clone, PartialEq)]

@@ -4,11 +4,25 @@ use std::path::Path;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
 use tracing::debug;
+use serde::Deserialize;
 
 use crate::downloader::core::{
     DownloadRequest, DownloadResult, ProgressCallback, Result,
     DownloadError, ValidationType, ProgressEvent
 };
+
+/// Raw GameFile archive state from JSON parsing
+#[derive(Debug, Deserialize, Clone)]
+pub struct GameFileArchiveState {
+    #[serde(rename = "Game")]
+    pub game: String,
+    #[serde(rename = "GameFile")]
+    pub game_file: String,
+    #[serde(rename = "GameVersion")]
+    pub game_version: String,
+    #[serde(rename = "Hash")]
+    pub hash: String,
+}
 
 /// Game file copy source
 #[derive(Debug, Clone, PartialEq)]

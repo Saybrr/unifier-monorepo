@@ -2,6 +2,7 @@
 
 use tracing::{debug, info};
 use once_cell::sync::OnceCell;
+use serde::Deserialize;
 
 use crate::downloader::api::nexus_api::NexusAPI;
 use crate::downloader::core::{
@@ -10,6 +11,29 @@ use crate::downloader::core::{
 };
 use crate::downloader::core::http::HttpClient;
 use crate::downloader::core::files::check_existing_file;
+
+/// Raw Nexus archive state from JSON parsing
+#[derive(Debug, Deserialize, Clone)]
+pub struct NexusArchiveState {
+    #[serde(rename = "ModID")]
+    pub mod_id: u32,
+    #[serde(rename = "FileID")]
+    pub file_id: u32,
+    #[serde(rename = "GameName")]
+    pub game_name: String,
+    #[serde(rename = "Name")]
+    pub name: String,
+    #[serde(rename = "Author")]
+    pub author: Option<String>,
+    #[serde(rename = "Version")]
+    pub version: String,
+    #[serde(rename = "Description")]
+    pub description: String,
+    #[serde(rename = "IsNSFW")]
+    pub is_nsfw: bool,
+    #[serde(rename = "ImageURL")]
+    pub image_url: Option<String>,
+}
 
 /// Global Nexus authentication client instance
 static NEXUS_API: OnceCell<NexusAPI> = OnceCell::new();
