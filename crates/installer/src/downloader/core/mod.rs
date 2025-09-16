@@ -43,6 +43,7 @@ pub struct DownloadMetadata {
 /// This is the unified structure that combines parsing and downloading.
 /// It contains all data needed to download, validate, and organize files.
 /// It uses DownloadSource enum for compile-time dispatch.
+#[derive(Clone)]
 pub struct DownloadRequest {
     /// The download source (enum for compile-time dispatch)
     pub source: DownloadSource,
