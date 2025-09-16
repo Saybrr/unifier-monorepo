@@ -7,10 +7,7 @@
 //! rather than converting to URL strings, as this provides better type safety,
 //! performance, and allows for richer data representation.
 
-pub mod operations;
 pub mod parser;
 
 // Re-export main types
 pub use crate::downloader::sources::{DownloadSource, HttpSource, NexusSource, GameFileSource, ManualSource, ArchiveSource};
-pub use operations::{ArchiveManifest, ManifestMetadata};
-pub use parser::{parse_modlist, ModlistParser};

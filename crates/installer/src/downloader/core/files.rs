@@ -26,11 +26,6 @@ pub async fn check_existing_file(
     let size = fs::metadata(dest_path).await?.len();
     debug!("File already exists: {} ({} bytes)", dest_path.display(), size);
 
-    if validation.is_empty() {
-        // No validation needed, file exists
-        debug!("File exists and no validation required");
-        return Ok(Some(DownloadResult::AlreadyExists { size }));
-    }
 
     // Validate existing file
     match validation.validate_file(dest_path, progress_callback.clone()).await {

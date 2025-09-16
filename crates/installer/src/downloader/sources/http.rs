@@ -53,7 +53,6 @@ impl HttpSource {
         let size = self.download_with_mirrors(&dest_path, progress_callback.clone(), Some(request.expected_size), config).await?;
 
         // Validate the downloaded file (only if validation is specified)
-        if !request.validation.is_empty() {
             debug!("Validating HTTP downloaded file: {} (expected_size: {:?})",
                    dest_path.display(), request.validation.expected_size);
 
@@ -77,7 +76,6 @@ impl HttpSource {
                     debug!("HTTP file validation failed with error: {}", e);
                     tokio::fs::remove_file(&dest_path).await?;
                     return Err(e); // Propagate the specific error (e.g., SizeMismatch)
-                }
             }
         }
 

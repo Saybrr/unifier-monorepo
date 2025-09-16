@@ -111,8 +111,6 @@ pub use downloader::{
 
 // Re-export parse_wabbajack types
 pub use parse_wabbajack::{
-    // Core parsing types
-    ArchiveManifest, ManifestMetadata, parse_modlist, ModlistParser,
 
     // Source types
     DownloadSource as WabbajackDownloadSource, HttpSource, NexusSource,
