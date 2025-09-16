@@ -68,29 +68,7 @@ wiremock = "0.6"
 tracing-subscriber = "0.3"
 http = "0.2"
 
-[[example]]
-name = "structured_download_example"
-path = "../../examples/structured_download_example.rs"
 
-[[example]]
-name = "parse_baseline_example"
-path = "../../examples/parse_baseline_example.rs"
-
-[[example]]
-name = "wabbajack_cdn_example"
-path = "../../examples/wabbajack_cdn_example.rs"
-
-[[example]]
-name = "size_progress_example"
-path = "../../examples/size_progress_example.rs"
-
-[[example]]
-name = "gamefile_example"
-path = "../../examples/gamefile_example.rs"
-
-[[example]]
-name = "simple_baseline_download"
-path = "../../examples/simple_baseline_download.rs"
 
 [[example]]
 name = "hp_bl_dl"

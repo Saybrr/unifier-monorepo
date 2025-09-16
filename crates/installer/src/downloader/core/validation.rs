@@ -63,10 +63,9 @@ pub struct FileValidation {
 impl FileValidation {
     pub fn new(hash: String, size: u64) -> Self {
         Self {
-            xxhash64_base64: Some(hash),
+            xxhash64_base64: if hash.is_empty() { None } else { Some(hash) },
             expected_size: Some(size),
         }
-
     }
     /// Check if validation is needed
     pub fn is_empty(&self) -> bool {
