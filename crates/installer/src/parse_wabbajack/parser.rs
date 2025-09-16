@@ -267,9 +267,7 @@ pub enum ParseError {
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
 
-    use http::request;
 
     use super::*;
 
