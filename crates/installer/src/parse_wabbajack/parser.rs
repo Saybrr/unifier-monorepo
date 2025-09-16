@@ -13,9 +13,9 @@ use std::path::PathBuf;
 
 /// Raw modlist JSON structure as it appears in the file
 #[derive(Debug, Deserialize)]
-pub struct RawModlist {
+pub struct WabbaModlist {
     #[serde(rename = "Archives")]
-    pub archives: Vec<RawArchive>,
+    pub archives: Vec<Archive>,
     #[serde(rename = "Directives")]
     pub directives: Vec<Directive>,
     #[serde(rename = "Name", default)]
@@ -290,7 +290,7 @@ impl Directive {
 
 /// Raw archive entry from the JSON
 #[derive(Debug, Deserialize, Clone)]
-pub struct RawArchive {
+pub struct Archive {
     #[serde(rename = "Hash")]
     pub hash: String,
 
@@ -304,13 +304,13 @@ pub struct RawArchive {
     pub size: u64,
 
     #[serde(rename = "State")]
-    pub state: RawDownloaderState,
+    pub state: ArchiveState,
 }
 
 /// Raw downloader state from JSON (tag-based deserialization using $type field)
 #[derive(Debug, Deserialize, Clone)]
 #[serde(tag = "$type")]
-pub enum RawDownloaderState {
+pub enum ArchiveState {
     #[serde(rename = "HttpDownloader, Wabbajack.Lib")]
     Http {
         #[serde(rename = "Url")]
@@ -386,7 +386,7 @@ impl ModlistParser {
 
     /// Parse a modlist JSON string into an ArchiveManifest
     pub fn parse(&self, json: &str, base_destination: &PathBuf) -> Result<ArchiveManifest, ParseError> {
-        let raw_modlist: RawModlist = serde_json::from_str(json)
+        let raw_modlist: WabbaModlist = serde_json::from_str(json)
             .map_err(ParseError::JsonParseError)?;
 
         let mut manifest = ArchiveManifest::new();
@@ -422,7 +422,7 @@ impl ModlistParser {
     /// Convert a raw archive to a structured download request
     fn convert_archive_to_request(
         &self,
-        archive: &RawArchive,
+        archive: &Archive,
         index: usize,
         base_destination: &PathBuf,
     ) -> Result<DownloadRequest, ParseError> {
@@ -452,12 +452,12 @@ impl ModlistParser {
     /// Convert raw downloader state to structured source
     fn convert_downloader_state(
         &self,
-        state: &RawDownloaderState,
+        state: &ArchiveState,
         archive_name: &str,
         meta: &str
     ) -> Result<DownloadSource, ParseError> {
         match state {
-            RawDownloaderState::Http { url, headers } => {
+            ArchiveState::Http { url, headers } => {
                 let mut http_source = HttpSource::new(url);
 
                 // Parse headers if any (they come as "Key: Value" strings)
@@ -473,7 +473,7 @@ impl ModlistParser {
                 Ok(DownloadSource::Http(http_source))
             },
 
-            RawDownloaderState::Nexus {
+            ArchiveState::Nexus {
                 mod_id, file_id, game_name, name, author, version, description, is_nsfw, ..
             } => {
                 let author_str = author.as_deref().unwrap_or("Unknown");
@@ -489,17 +489,17 @@ impl ModlistParser {
                 Ok(DownloadSource::Nexus(nexus_source))
             },
 
-            RawDownloaderState::GameFile { game, game_file, game_version, .. } => {
+            ArchiveState::GameFile { game, game_file, game_version, .. } => {
                 let gamefile_source = GameFileSource::new(game, game_file, game_version);
                 Ok(DownloadSource::GameFile(gamefile_source))
             },
 
-            RawDownloaderState::WabbajackCDN { url } => {
+            ArchiveState::WabbajackCDN { url } => {
                 let wabbajack_cdn_source = WabbajackCDNSource::new(url);
                 Ok(DownloadSource::WabbajackCDN(wabbajack_cdn_source))
             },
 
-            RawDownloaderState::Unknown => {
+            ArchiveState::Unknown => {
                 let unknown_source = UnknownSource::new(
                     "Unknown Downloader Type".to_string(),
                     Some(archive_name.to_string()),
