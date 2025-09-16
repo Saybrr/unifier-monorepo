@@ -9,7 +9,7 @@ pub mod api;
 pub mod r#lib;
 
 // Re-export main types for convenience
-pub use r#lib::Downloader;
+pub use r#lib::DownloadPipeline;
 pub use core::{
     DownloadRequest, DownloadResult, DownloadMetadata,
     ProgressCallback, ProgressEvent, ProgressReporter, IntoProgressCallback,

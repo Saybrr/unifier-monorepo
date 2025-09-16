@@ -7,7 +7,8 @@ use crate::parse_wabbajack::parser::WabbaModlist;
 use crate::{
     Result, DownloadError
 };
-use crate::downloader::{Downloader, DownloadConfig, ProgressCallback};
+use crate::downloader::{DownloadConfig, ProgressCallback};
+use crate::downloader::lib::DownloadPipeline;
 use crate::integrations::progress::DashboardProgressReporter;
 use crate::IntoProgressCallback;
 use crate::downloader::core::DownloadResult;
@@ -110,14 +111,20 @@ impl ModlistDownloader {
         if needs_nexus {
             crate::initialize_nexus_api().await?;
         }
-        // Create downloader with appropriate configuration
-        let downloader = Downloader::new(DownloadConfig::default());
+        // Create download pipeline with appropriate configuration
+        let pipeline = DownloadPipeline::new(
+            DownloadConfig::default(),
+            self.options.max_concurrent_downloads,
+            3, // max_retries
+        );
+
+        // Store the count before moving download_requests
+        let total_requests = download_requests.len();
 
         // Execute batch download
-        let results = downloader.download_batch(
-            &download_requests,
+        let results = pipeline.process_batch(
+            download_requests,
             self.progress_callback,
-            self.options.max_concurrent_downloads,
         ).await;
 
         // Process results and collect statistics
@@ -177,7 +184,7 @@ impl ModlistDownloader {
             skipped_downloads: skipped_downloads,
             total_bytes_downloaded,
             elapsed_time,
-            total_requests: download_requests.len(),
+            total_requests,
             error_messages,
         })
     }

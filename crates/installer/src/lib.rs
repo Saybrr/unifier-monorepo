@@ -8,7 +8,7 @@ pub mod install;
 // Re-export commonly used types for convenience
 pub use downloader::{
     // Core types
-    DownloadRequest, DownloadResult, Downloader, ValidationHandle,
+    DownloadRequest, DownloadResult, ValidationHandle,
 
 
 
