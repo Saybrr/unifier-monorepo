@@ -92,14 +92,13 @@ impl ModlistDownloader {
     pub async fn download(self) -> Result<ModlistDownloadResult> {
         let start_time = std::time::Instant::now();
 
-        // Use current directory as default destination
-
         // Read and parse the modlist
         let modlist_json = std::fs::read_to_string(&self.modlist_path)
-            .map_err(|e| DownloadError::Legacy(format!("Failed to read modlist file: {}", e)))?;
-
-        // let manifest = ModlistParser::new().parse(&modlist_json, &self.destination)
-            // .map_err(|e| DownloadError::Legacy(format!("Failed to parse modlist: {}", e)))?;
+            .map_err(|e| DownloadError::FileSystem {
+                path: self.modlist_path.clone(),
+                operation: crate::downloader::core::FileOperation::Read,
+                source: e,
+            })?;
 
         let manifest = WabbaModlist::parse(&modlist_json).unwrap();
 
@@ -121,29 +120,45 @@ impl ModlistDownloader {
             self.options.max_concurrent_downloads,
         ).await;
 
-        // Process results
-        //TODO: Examine this logic and make sure its correct
+        // Process results and collect statistics
         let mut successful_downloads = 0;
         let mut failed_downloads = 0;
         let mut total_bytes_downloaded = 0;
         let mut error_messages = Vec::new();
         let mut skipped_downloads = 0;
+
         for result in results {
             match result {
                 Ok(verified_dl_result) => {
-                    match verified_dl_result.download_result {
-                        DownloadResult::Downloaded { size, .. } |
-                        DownloadResult::AlreadyExists { size, .. } |
-                        DownloadResult::Resumed { size, .. } => {
-                            total_bytes_downloaded += size;
-                            successful_downloads += 1;
+                    // Check validation result first
+                    match verified_dl_result.validation_result {
+                        crate::downloader::core::ValidationResult::Valid |
+                        crate::downloader::core::ValidationResult::AlreadyValidated |
+                        crate::downloader::core::ValidationResult::Skipped => {
+                            // Validation passed or was skipped, count based on download result
+                            match verified_dl_result.download_result {
+                                DownloadResult::Downloaded { size, .. } |
+                                DownloadResult::Resumed { size, .. } => {
+                                    total_bytes_downloaded += size;
+                                    successful_downloads += 1;
+                                }
+                                DownloadResult::AlreadyExists { size, .. } => {
+                                    total_bytes_downloaded += size;
+                                    successful_downloads += 1;
+                                }
+                                DownloadResult::DownloadedPendingValidation { size, .. } => {
+                                    total_bytes_downloaded += size;
+                                    successful_downloads += 1;
+                                }
+                                DownloadResult::Skipped { .. } => {
+                                    skipped_downloads += 1;
+                                }
+                            }
                         }
-                        DownloadResult::DownloadedPendingValidation { size, .. } => {
-                            total_bytes_downloaded += size;
-                        }
-
-                        DownloadResult::Skipped { reason: _ } => {
-                            skipped_downloads += 1;
+                        crate::downloader::core::ValidationResult::Invalid(e) => {
+                            // Validation failed, count as failure
+                            failed_downloads += 1;
+                            error_messages.push(format!("Validation failed: {}", e));
                         }
                     }
                 }

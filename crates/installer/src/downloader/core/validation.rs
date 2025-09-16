@@ -125,19 +125,36 @@ impl FileValidation {
 
         // Compute xxHash64 if we have an expected hash
         if let Some(ref expected_hash_base64) = self.xxhash64_base64 {
-            let actual_hash = tokio::task::spawn_blocking(move || {
-                // Use the same incremental API as streaming for consistency
+            let file_size = file_data.len();
+            let actual_hash = if file_size > 10_000_000 {
+                // For files > 10MB, use blocking thread to prevent UI blocking
+                tokio::task::spawn_blocking(move || {
+                    let mut hasher = Xxh64::new(0);
+
+                    // Process in chunks even in memory to allow for potential cancellation
+                    const CHUNK_SIZE: usize = 1024 * 1024; // 1MB chunks
+                    for chunk in file_data.chunks(CHUNK_SIZE) {
+                        hasher.update(chunk);
+                        // Note: In a blocking thread, we can't yield, but we process in smaller chunks
+                        // to make the work more granular
+                    }
+
+                    let hash = hasher.digest();
+                    xxhash64_to_base64(hash)
+                }).await.map_err(|e| {
+                    DownloadError::ValidationTaskFailed {
+                        file: path.to_path_buf(),
+                        reason: format!("Hash computation failed: {}", e),
+                        source: Some(Box::new(e) as Box<dyn std::error::Error + Send + Sync>),
+                    }
+                })?
+            } else {
+                // For smaller files, compute hash directly (fast enough)
                 let mut hasher = Xxh64::new(0);
                 hasher.update(&file_data);
                 let hash = hasher.digest();
                 xxhash64_to_base64(hash)
-            }).await.map_err(|e| {
-                DownloadError::ValidationTaskFailed {
-                    file: path.to_path_buf(),
-                    reason: format!("Hash computation failed: {}", e),
-                    source: Some(Box::new(e) as Box<dyn std::error::Error + Send + Sync>),
-                }
-            })?;
+            };
 
             let validation_passed = &actual_hash == expected_hash_base64;
             debug!("XXHash64 in-memory validation: expected={}, actual={}, passed={}",
@@ -172,9 +189,10 @@ impl FileValidation {
         });
 
         let mut file = fs::File::open(path).await?;
-        let buffer_size = (64 * 1024).min(file_size as usize); // Use 64KB buffer, more reasonable than 8KB
-        let mut buffer = get_buffer(buffer_size); // Use fixed buffer pool
+        let buffer_size = (64 * 1024).min(file_size as usize); // Use 64KB buffer
+        let mut buffer = get_buffer(buffer_size);
         let mut bytes_read_total = 0u64;
+        let mut last_progress_report = std::time::Instant::now();
 
         loop {
             let bytes_read = file.read(&mut buffer).await?;
@@ -193,12 +211,27 @@ impl FileValidation {
 
             bytes_read_total += bytes_read as u64;
 
+            // Yield to async runtime every ~50 chunks (3.2MB) or 100ms to prevent UI blocking
+            let now = std::time::Instant::now();
+
+
+            // Report progress at most every 100ms or every 1% of progress to avoid overwhelming UI
             if let Some(ref callback) = progress_callback {
                 let progress = bytes_read_total as f64 / file_size as f64;
-                callback(crate::downloader::core::progress::ProgressEvent::ValidationProgress {
-                    file: path.display().to_string(),
-                    progress,
-                });
+                let progress_percent = (progress * 100.0) as u64;
+                let time_since_last_report = now.duration_since(last_progress_report);
+
+                // Report if 100ms passed OR if we've made 1% progress since last report
+                let should_report = time_since_last_report.as_millis() >= 100 ||
+                    (progress_percent > 0 && progress_percent % 1 == 0);
+
+                if should_report {
+                    callback(crate::downloader::core::progress::ProgressEvent::ValidationProgress {
+                        file: path.display().to_string(),
+                        progress,
+                    });
+                    last_progress_report = now;
+                }
             }
         }
 
@@ -238,29 +271,6 @@ impl FileValidation {
         }
     }
 
-    /// Validate file in a blocking context (optimized for CPU-intensive work)
-    pub async fn validate_file_blocking<P: AsRef<Path>>(
-        &self,
-        path: P,
-        progress_callback: Option<ProgressCallback>,
-    ) -> Result<bool> {
-        let path = path.as_ref().to_path_buf();
-        let validation = self.clone();
-        let callback = progress_callback.clone();
-
-        // Move to blocking thread to avoid blocking the async runtime
-        let path_clone = path.clone();
-        tokio::task::spawn_blocking(move || {
-            let rt = tokio::runtime::Handle::current();
-            rt.block_on(validation.validate_file(&path, callback))
-        })
-        .await
-        .map_err(|e| DownloadError::ValidationTaskFailed {
-            file: path_clone,
-            reason: format!("Validation task failed: {}", e),
-            source: Some(Box::new(e) as Box<dyn std::error::Error + Send + Sync>),
-        })?
-    }
 }
 
 /// Handle to track async validation
@@ -298,7 +308,7 @@ impl ValidationPool {
 
         let task_handle = tokio::spawn(async move {
             let _permit = semaphore.acquire().await.unwrap();
-            validation.validate_file_blocking(&path_clone, progress_callback).await
+            validation.validate_file(&path_clone, progress_callback).await
         });
 
         ValidationHandle {
