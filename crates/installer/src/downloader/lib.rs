@@ -111,7 +111,7 @@ impl Downloader {
     /// This method provides basic batch downloading with concurrency control
     pub async fn download_batch(
         &self,
-        requests: Vec<DownloadRequest>,
+        requests: &Vec<DownloadRequest>,
         progress_callback: Option<ProgressCallback>,
         max_concurrent: usize,
     ) -> Vec<Result<DownloadResult>> {
@@ -139,18 +139,5 @@ impl Downloader {
         }
 
         results
-    }
-
-    /// Download multiple files with async validation and validation retry
-    ///
-    /// For now, this is the same as download_batch since each source
-    /// handles its own validation
-    pub async fn download_batch_with_async_validation(
-        &self,
-        requests: Vec<DownloadRequest>,
-        progress_callback: Option<ProgressCallback>,
-        max_concurrent_downloads: usize,
-    ) -> Vec<Result<DownloadResult>> {
-        self.download_batch(requests, progress_callback, max_concurrent_downloads).await
     }
 }

@@ -8,7 +8,7 @@ use serde::Deserialize;
 
 use crate::downloader::core::{
     DownloadRequest, DownloadResult, ProgressCallback, Result,
-    DownloadError, ValidationType, ProgressEvent
+    DownloadError, ValidationType, ProgressEvent, files::check_existing_file
 };
 
 /// Raw GameFile archive state from JSON parsing
@@ -49,7 +49,7 @@ impl GameFileSource {
                self.file_path, self.game, self.game_version);
 
         // Check if file already exists and is valid
-        if let Some(result) = self.check_existing_file(&dest_path, &request.validation, progress_callback.clone()).await? {
+        if let Some(result) = check_existing_file(&dest_path, &request.validation, progress_callback.clone()).await? {
             return Ok(result);
         }
 
@@ -70,7 +70,6 @@ impl GameFileSource {
         let size = self.copy_file_with_progress(&source_path, &dest_path, progress_callback.clone()).await?;
 
         // Validate the copied file (only if validation is specified)
-        if !request.validation.is_empty() {
             debug!("Validating copied game file: {} (expected_size: {:?})",
                    dest_path.display(), request.validation.expected_size);
 
@@ -94,7 +93,6 @@ impl GameFileSource {
                     debug!("Game file validation failed with error: {}", e);
                     fs::remove_file(&dest_path).await?;
                     return Err(e); // Propagate the specific error (e.g., SizeMismatch)
-                }
             }
         }
 
@@ -305,49 +303,6 @@ impl GameFileSource {
         Ok(copied)
     }
 
-    /// Check if file exists and is valid
-    async fn check_existing_file(
-        &self,
-        dest_path: &Path,
-        validation: &crate::downloader::core::FileValidation,
-        progress_callback: Option<ProgressCallback>,
-    ) -> Result<Option<DownloadResult>> {
-        if !dest_path.exists() {
-            return Ok(None);
-        }
-
-        debug!("File already exists: {}", dest_path.display());
-
-        // If no validation required, assume file is good
-        if validation.is_empty() {
-            let metadata = fs::metadata(dest_path).await?;
-            debug!("Using existing file: {} ({} bytes)", dest_path.display(), metadata.len());
-            return Ok(Some(DownloadResult::AlreadyExists {
-                size: metadata.len()
-            }));
-        }
-
-        // Validate existing file
-        if validation.validate_file(dest_path, progress_callback.clone()).await? {
-            let metadata = fs::metadata(dest_path).await?;
-            debug!("Using existing validated file: {} ({} bytes)", dest_path.display(), metadata.len());
-            Ok(Some(DownloadResult::AlreadyExists {
-                size: metadata.len()
-            }))
-        } else {
-            // Report warning through progress callback
-            if let Some(ref callback) = progress_callback {
-                let url = format!("gamefile://{}", self.file_path);
-                callback(ProgressEvent::Warning {
-                    url,
-                    message: format!("Existing file failed validation, will re-copy: {}", dest_path.display()),
-                });
-            }
-            // Remove invalid file
-            fs::remove_file(dest_path).await?;
-            Ok(None)
-        }
-    }
 }
 
 impl GameFileSource {
@@ -363,3 +318,4 @@ impl GameFileSource {
         }
     }
 }
+

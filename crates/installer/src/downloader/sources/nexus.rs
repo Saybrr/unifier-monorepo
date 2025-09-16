@@ -165,7 +165,6 @@ impl NexusSource {
         //                                                 progress_callback.clone(), config, expected_size).await?;
 
         // Validate the downloaded file (only if validation is specified)
-        if !request.validation.is_empty() {
             debug!("Validating Nexus downloaded file: {} (expected_size: {:?})",
                    dest_path.display(), request.validation.expected_size);
 
@@ -189,7 +188,6 @@ impl NexusSource {
                     debug!("Nexus file validation failed with error: {}", e);
                     tokio::fs::remove_file(&dest_path).await?;
                     return Err(e); // Propagate the specific error (e.g., SizeMismatch)
-                }
             }
         }
 

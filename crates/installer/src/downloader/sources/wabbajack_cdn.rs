@@ -12,7 +12,7 @@ use base64::{Engine as _, engine::general_purpose};
 
 use crate::downloader::core::{
     DownloadRequest, DownloadResult, ProgressCallback, Result,
-    DownloadError, ValidationType, ProgressEvent
+    DownloadError, ValidationType, ProgressEvent,files::check_existing_file
 };
 
 /// Raw WabbajackCDN archive state from JSON parsing
@@ -67,7 +67,7 @@ impl WabbajackCDNSource {
         debug!("WabbajackCDN downloading {} to {}", self.url, dest_path.display());
 
         // Check if file already exists and is valid
-        if let Some(result) = self.check_existing_file(&dest_path, &request.validation, progress_callback.clone()).await? {
+        if let Some(result) = check_existing_file(&dest_path, &request.validation, progress_callback.clone()).await? {
             return Ok(result);
         }
 
@@ -269,24 +269,6 @@ impl WabbajackCDNSource {
         Ok(())
     }
 
-    /// Check if file exists and is valid
-    async fn check_existing_file(
-        &self,
-        dest_path: &Path,
-        _validation: &crate::downloader::core::FileValidation,
-        _progress_callback: Option<ProgressCallback>,
-    ) -> Result<Option<DownloadResult>> {
-        if !dest_path.exists() {
-            return Ok(None);
-        }
-
-        // TODO: Implement proper validation for existing files
-        let metadata = fs::metadata(dest_path).await?;
-
-        Ok(Some(DownloadResult::AlreadyExists {
-            size: metadata.len()
-        }))
-    }
 }
 
 impl WabbajackCDNSource {

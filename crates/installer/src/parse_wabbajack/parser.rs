@@ -3,10 +3,7 @@
 //! This module handles parsing the Wabbajack modlist JSON format and converting
 //! it into structured DownloadOperation objects.
 
-use crate::parse_wabbajack::{
-    operations::{ArchiveManifest, ManifestMetadata},
-};
-use crate::downloader::core::{DownloadRequest, DownloadMetadata, DownloadSource};
+use crate::downloader::core::{DownloadRequest,  DownloadSource};
 use crate::downloader::sources::{HttpArchiveState, NexusArchiveState, GameFileArchiveState, WabbajackCDNArchiveState};
 use crate::install::directives::{
     FromArchiveDirective,
@@ -41,6 +38,24 @@ pub struct WabbaModlist {
     pub game: String,
     #[serde(rename = "Description", default)]
     pub description: String,
+}
+
+impl WabbaModlist {
+
+    /// Parse a modlist JSON string into an ArchiveManifest
+    pub fn parse(json: &str ) -> Result<WabbaModlist, ParseError> {
+        let modlist: WabbaModlist = serde_json::from_str(json)
+            .map_err(ParseError::JsonParseError)?;
+        Ok(modlist)
+    }
+
+    pub fn get_dl_requests(&self, base_destination: &PathBuf) -> Result<Vec<DownloadRequest>, ParseError> {
+        let requests = self.archives.iter()
+            .map(|archive| archive.to_dl_request(base_destination))
+            .collect::<Result<Vec<DownloadRequest>, ParseError>>()?;
+        Ok(requests)
+    }
+
 }
 
 /// Raw directive entry from the JSON
@@ -213,135 +228,29 @@ pub enum ArchiveState {
     Unknown,
 }
 
-/// Parser for Wabbajack modlists
-pub struct ModlistParser {
-    /// Optional hash algorithm override (default: SHA256)
-    pub default_hash_algorithm: String,
-}
-
-impl ModlistParser {
-    /// Create a new parser with default settings
-    pub fn new() -> Self {
-        Self {
-            default_hash_algorithm: "XXHASH64".to_string(),
-        }
-    }
-
-    /// Set the default hash algorithm
-    pub fn with_hash_algorithm<S: Into<String>>(mut self, algorithm: S) -> Self {
-        self.default_hash_algorithm = algorithm.into();
-        self
-    }
-
-    /// Parse a modlist JSON string into an ArchiveManifest
-    pub fn parse(&self, json: &str, base_destination: &PathBuf) -> Result<ArchiveManifest, ParseError> {
-        let raw_modlist: WabbaModlist = serde_json::from_str(json)
-            .map_err(ParseError::JsonParseError)?;
-
-        let mut manifest = ArchiveManifest::new();
-
-        // Set manifest metadata
-        manifest.metadata = ManifestMetadata {
-            name: raw_modlist.name.clone(),
-            version: raw_modlist.version.clone(),
-            author: raw_modlist.author.clone(),
-            game: raw_modlist.game.clone(),
-            description: raw_modlist.description.clone(),
-        };
-
-        // Convert archives to requests
-        for (index, archive) in raw_modlist.archives.iter().enumerate() {
-            match self.convert_archive_to_request(archive, index, base_destination) {
-                Ok(request) => manifest.add_request(request),
-                Err(e) => {
-                    // Log the error but continue with other archives
-                    eprintln!("Warning: Failed to convert archive '{}': {}", archive.name, e);
-                }
-            }
-        }
-
-        for directive in raw_modlist.directives.iter() {
-                manifest.add_directive(directive.clone());
-        }
-
-        Ok(manifest)
-    }
-
+impl Archive {
     /// Convert a wabba modlist archive to a structured download request
-    fn convert_archive_to_request(
+    fn to_dl_request(
         &self,
-        archive: &Archive,
-        index: usize,
         base_destination: &PathBuf,
     ) -> Result<DownloadRequest, ParseError> {
-        let metadata = DownloadMetadata {
-            description: format!("Archive: {}", archive.name),
-            category: self.infer_category(&archive.name),
-            required: true, // Most modlist archives are required
-            tags: self.extract_tags_from_meta(&archive.meta),
-        };
 
         let request = DownloadRequest::new(
-            archive.state.clone(),
+            self.state.clone(),
             base_destination,
-            archive.name.clone(),
-            archive.size,
-            archive.hash.clone(),
-        )
-        .with_hash_algorithm(&self.default_hash_algorithm)
-        .with_priority(index as u32) // Use index as default priority
-        .with_metadata(metadata);
+            self.name.clone(),
+            self.size,
+            self.hash.clone(),
+        );
 
         Ok(request)
     }
 
-    /// Infer category from filename patterns
-    fn infer_category(&self, filename: &str) -> String {
-        let lower = filename.to_lowercase();
-
-        if lower.contains("texture") || lower.contains("dds") {
-            "Textures".to_string()
-        } else if lower.contains("mesh") || lower.contains("nif") {
-            "Meshes".to_string()
-        } else if lower.contains("esp") || lower.contains("esm") || lower.contains("esl") {
-            "Plugins".to_string()
-        } else if lower.contains("script") || lower.contains("psc") {
-            "Scripts".to_string()
-        } else if lower.contains("sound") || lower.contains("wav") || lower.contains("xwm") {
-            "Audio".to_string()
-        } else if lower.contains("animation") || lower.contains("hkx") {
-            "Animations".to_string()
-        } else {
-            "General".to_string()
-        }
-    }
-
-    /// Extract tags from the Meta field
-    fn extract_tags_from_meta(&self, meta: &str) -> Vec<String> {
-        let mut tags = Vec::new();
-
-        // Parse simple key-value pairs from Meta field
-        for line in meta.lines() {
-            if line.contains("gameName=") {
-                tags.push("game-specific".to_string());
-            }
-            if line.contains("modID=") {
-                tags.push("nexus-mod".to_string());
-            }
-            if line.contains("directURL=") {
-                tags.push("direct-download".to_string());
-            }
-        }
-
-        tags
-    }
 }
 
-impl Default for ModlistParser {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+
+
+
 
 /// Errors that can occur during parsing
 #[derive(Debug, thiserror::Error)]
@@ -356,13 +265,12 @@ pub enum ParseError {
     InvalidArchiveData(String),
 }
 
-/// Convenience function to parse a modlist JSON string
-pub fn parse_modlist(json: &str, base_destination: &PathBuf) -> Result<ArchiveManifest, ParseError> {
-    ModlistParser::new().parse(json, base_destination)
-}
-
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
+    use http::request;
+
     use super::*;
 
     #[test]
@@ -390,12 +298,17 @@ mod tests {
         }"#;
 
         let base_destination = PathBuf::from("/downloads");
-        let manifest = parse_modlist(json, &base_destination).expect("Failed to parse test modlist");
+        let manifest: WabbaModlist = serde_json::from_str(json).map_err(ParseError::JsonParseError)
+            .expect("Failed to parse JSON");
 
-        assert_eq!(manifest.requests.len(), 1);
-        assert_eq!(manifest.metadata.name, "Test Modlist");
 
-        let request = &manifest.requests[0];
+        let requests = manifest.archives.iter()
+            .map(|archive| archive.to_dl_request(&base_destination))
+            .collect::<Result<Vec<DownloadRequest>, ParseError>>()
+            .expect("Failed to convert archives to download requests");
+        assert_eq!(requests.len(), 1);
+
+        let request = &requests[0];
         assert_eq!(request.filename, "test-file.zip");
 
         if let DownloadSource::Http(http_source) = &request.source {
@@ -432,11 +345,16 @@ mod tests {
         }"#;
 
         let base_destination = std::path::PathBuf::from("/tmp");
-        let manifest = parse_modlist(json, &base_destination).expect("Failed to parse nexus test");
+        let manifest: WabbaModlist = serde_json::from_str(json).map_err(ParseError::JsonParseError)
+            .expect("Failed to parse JSON");
 
-        assert_eq!(manifest.requests.len(), 1);
+        let requests = manifest.archives.iter()
+            .map(|archive| archive.to_dl_request(&base_destination))
+            .collect::<Result<Vec<DownloadRequest>, ParseError>>()
+            .expect("Failed to convert archives to download requests");
+        assert_eq!(requests.len(), 1);
 
-        let operation = &manifest.requests[0];
+        let operation = &requests[0];
         if let DownloadSource::Nexus(nexus_source) = &operation.source {
             assert_eq!(nexus_source.mod_id, 12345);
             assert_eq!(nexus_source.file_id, 67890);
@@ -468,11 +386,16 @@ mod tests {
         }"#;
 
         let base_destination = std::path::PathBuf::from("/tmp");
-        let manifest = parse_modlist(json, &base_destination).expect("Failed to parse unknown test");
+        let manifest: WabbaModlist = serde_json::from_str(json).map_err(ParseError::JsonParseError)
+        .expect("Failed to parse JSON");
 
-        assert_eq!(manifest.requests.len(), 1);
+    let requests = manifest.archives.iter()
+        .map(|archive| archive.to_dl_request(&base_destination))
+        .collect::<Result<Vec<DownloadRequest>, ParseError>>()
+        .expect("Failed to convert archives to download requests");
+    assert_eq!(requests.len(), 1);
 
-        let operation = &manifest.requests[0];
+        let operation = &requests[0];
         if let DownloadSource::Unknown(unknown_source) = &operation.source {
             assert_eq!(unknown_source.source_type, "Unknown Downloader Type");
             // With serde from conversion, archive_name and meta are not available in the ArchiveState::Unknown variant

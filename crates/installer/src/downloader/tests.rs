@@ -574,7 +574,7 @@ mod enhanced_downloader_tests {
         let progress = ProgressCapture::new();
 
         let results = downloader
-            .download_batch(requests, Some(progress.get_callback()), 2)
+            .download_batch(&requests, Some(progress.get_callback()), 2)
             .await;
 
         assert_eq!(results.len(), 2);

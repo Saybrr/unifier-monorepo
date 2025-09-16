@@ -67,10 +67,7 @@ impl FileValidation {
             expected_size: Some(size),
         }
     }
-    /// Check if validation is needed
-    pub fn is_empty(&self) -> bool {
-        self.xxhash64_base64.is_none() && self.expected_size.is_none()
-    }
+
 
     /// Validate a file against the configured validation parameters
     pub async fn validate_file<P: AsRef<Path>>(

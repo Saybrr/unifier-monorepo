@@ -39,8 +39,8 @@ impl RemappedInlineFileDirective {
         &self,
         install_dir: &PathBuf,
         extracted_modlist_dir: &PathBuf,
-        game_dir: &PathBuf,
-        downloads_dir: &PathBuf,
+        _game_dir: &PathBuf,
+        _downloads_dir: &PathBuf,
         _progress_callback: Option<Box<dyn Fn(u64, u64)>>,
     ) -> Result<(), InstallError> {
         // TODO: Implement remapped inline file writing logic

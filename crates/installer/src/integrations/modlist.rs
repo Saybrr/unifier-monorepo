@@ -3,8 +3,9 @@
 //! Provides a simple, fluent API for downloading entire modlists with sensible defaults.
 
 use std::path::PathBuf;
+use crate::parse_wabbajack::parser::WabbaModlist;
 use crate::{
-    ModlistParser, Result, DownloadError
+    Result, DownloadError
 };
 use crate::downloader::{Downloader, DownloadConfig, ProgressCallback};
 use crate::integrations::progress::DashboardProgressReporter;
@@ -96,12 +97,12 @@ impl ModlistDownloader {
         let modlist_json = std::fs::read_to_string(&self.modlist_path)
             .map_err(|e| DownloadError::Legacy(format!("Failed to read modlist file: {}", e)))?;
 
-        let manifest = ModlistParser::new().parse(&modlist_json, &self.destination)
-            .map_err(|e| DownloadError::Legacy(format!("Failed to parse modlist: {}", e)))?;
+        // let manifest = ModlistParser::new().parse(&modlist_json, &self.destination)
+            // .map_err(|e| DownloadError::Legacy(format!("Failed to parse modlist: {}", e)))?;
 
-        // Get requests directly from manifest - no conversion needed!
-        let download_requests = manifest.requests;
+        let manifest = WabbaModlist::parse(&modlist_json).unwrap();
 
+        let download_requests = manifest.get_dl_requests(&self.destination).unwrap();
         // Check if any download request is a NexusSource, and initialize Nexus API if needed
         let needs_nexus = download_requests.iter().any(|req| {
             matches!(&req.source, crate::parse_wabbajack::DownloadSource::Nexus(_))
@@ -113,8 +114,8 @@ impl ModlistDownloader {
         let downloader = Downloader::new(DownloadConfig::default());
 
         // Execute batch download
-        let results = downloader.download_batch_with_async_validation(
-            download_requests,
+        let results = downloader.download_batch(
+            &download_requests,
             self.progress_callback,
             self.options.max_concurrent_downloads,
         ).await;
@@ -159,7 +160,7 @@ impl ModlistDownloader {
             skipped_downloads: skipped_downloads, // TODO: Track skipped downloads
             total_bytes_downloaded,
             elapsed_time,
-            total_requests: manifest.stats.total_operations,
+            total_requests: download_requests.len(),
             error_messages,
         })
     }
