@@ -169,17 +169,6 @@ impl DownloadPipeline {
         }
     }
 
-    /// Download multiple files (alias for process_batch for backward compatibility)
-    pub async fn download_batch(
-        &self,
-        requests: &Vec<DownloadRequest>,
-        progress_callback: Option<ProgressCallback>,
-        _max_concurrent: usize, // Ignored, uses the pipeline's configured concurrency
-    ) -> Vec<Result<VerifiedDownloadResult>> {
-        self.process_batch(requests.clone(), progress_callback).await
-    }
-
-    /// Get the maximum number of retries
     pub fn max_retries(&self) -> u32 {
         self.max_retries
     }
