@@ -161,37 +161,11 @@ impl NexusSource {
          // Use HttpClient's built-in retry logic
          let final_size = http_client.download_with_retry(&download_link.uri, &dest_path, expected_size, progress_callback.clone(), config).await?;
 
-        // let final_size = self.download_with_common_utils(&download_link.uri, &dest_path,
-        //                                                 progress_callback.clone(), config, expected_size).await?;
-
-        // Validate the downloaded file (only if validation is specified)
-            debug!("Validating Nexus downloaded file: {} (expected_size: {:?})",
-                   dest_path.display(), request.validation.expected_size);
-
-            match request.validation.validate_file(&dest_path, progress_callback).await {
-                Ok(true) => {
-                    debug!("Nexus file validation passed");
-                },
-                Ok(false) => {
-                    // This shouldn't happen as validate_file returns Err for failures
-                    tokio::fs::remove_file(&dest_path).await?;
-                    return Err(DownloadError::ValidationFailed {
-                        file: dest_path.clone(),
-                        validation_type: crate::downloader::core::ValidationType::Size,
-                        expected: "valid file".to_string(),
-                        actual: "invalid file".to_string(),
-                        suggestion: "Check file integrity or download again".to_string(),
-                    });
-                },
-                Err(e) => {
-                    // Log the specific validation error (like SizeMismatch)
-                    debug!("Nexus file validation failed with error: {}", e);
-                    tokio::fs::remove_file(&dest_path).await?;
-                    return Err(e); // Propagate the specific error (e.g., SizeMismatch)
-            }
-        }
-
-        Ok(DownloadResult::Downloaded { size: final_size })
+        // Return result with file path for centralized validation
+        Ok(DownloadResult::Downloaded {
+            size: final_size,
+            file_path: dest_path
+        })
     }
 
 }

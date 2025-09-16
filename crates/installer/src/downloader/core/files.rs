@@ -27,25 +27,40 @@ pub async fn check_existing_file(
     debug!("File already exists: {} ({} bytes)", dest_path.display(), size);
 
 
-    // Validate existing file
-    match validation.validate_file(dest_path, progress_callback.clone()).await {
-        Ok(true) => {
-            debug!("File exists and is valid");
-            Ok(Some(DownloadResult::AlreadyExists { size }))
+    // Check if validation is configured
+    if validation.xxhash64_base64.is_some() || validation.expected_size.is_some() {
+        // Validate existing file
+        match validation.validate_file(dest_path, progress_callback.clone()).await {
+            Ok(true) => {
+                debug!("File exists and is valid");
+                Ok(Some(DownloadResult::AlreadyExists {
+                    size,
+                    file_path: dest_path.to_path_buf(),
+                    validated: true
+                }))
+            }
+            Ok(false) => {
+                // This shouldn't happen as validate_file returns Err for failures
+                debug!("File exists but validation returned false (unexpected)");
+                report_invalid_file_warning(dest_path, progress_callback).await;
+                fs::remove_file(dest_path).await?;
+                Ok(None)
+            }
+            Err(e) => {
+                debug!("Existing file failed validation: {}", e);
+                report_invalid_file_warning(dest_path, progress_callback).await;
+                fs::remove_file(dest_path).await?;
+                Ok(None)
+            }
         }
-        Ok(false) => {
-            // This shouldn't happen as validate_file returns Err for failures
-            debug!("File exists but validation returned false (unexpected)");
-            report_invalid_file_warning(dest_path, progress_callback).await;
-            fs::remove_file(dest_path).await?;
-            Ok(None)
-        }
-        Err(e) => {
-            debug!("Existing file failed validation: {}", e);
-            report_invalid_file_warning(dest_path, progress_callback).await;
-            fs::remove_file(dest_path).await?;
-            Ok(None)
-        }
+    } else {
+        // No validation configured, file exists but not validated
+        debug!("File exists but no validation configured");
+        Ok(Some(DownloadResult::AlreadyExists {
+            size,
+            file_path: dest_path.to_path_buf(),
+            validated: false
+        }))
     }
 }
 

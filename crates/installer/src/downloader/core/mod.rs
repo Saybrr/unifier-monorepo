@@ -177,11 +177,11 @@ impl DownloadRequest {
 #[derive(Debug)]
 pub enum DownloadResult {
     /// File was successfully downloaded
-    Downloaded { size: u64 },
+    Downloaded { size: u64, file_path: PathBuf },
     /// File already existed and was validated
-    AlreadyExists { size: u64 },
+    AlreadyExists { size: u64, file_path: PathBuf, validated: bool },
     /// File was partially downloaded and resumed to completion
-    Resumed { size: u64 },
+    Resumed { size: u64, file_path: PathBuf },
     /// File downloaded but validation is still in progress
     ///
     /// This variant is used when async validation is enabled.
@@ -192,5 +192,25 @@ pub enum DownloadResult {
     },
     /// File was skipped
     Skipped { reason: String },
+}
+
+/// Result of validation operation
+#[derive(Debug)]
+pub enum ValidationResult {
+    /// Validation passed
+    Valid,
+    /// Validation failed with specific error
+    Invalid(DownloadError),
+    /// Validation was skipped (no validation configured)
+    Skipped,
+    /// File was already validated
+    AlreadyValidated,
+}
+
+/// Combined result for download + validation
+#[derive(Debug)]
+pub struct VerifiedDownloadResult {
+    pub download_result: DownloadResult,
+    pub validation_result: ValidationResult,
 }
 
