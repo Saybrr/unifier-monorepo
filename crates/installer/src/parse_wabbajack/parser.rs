@@ -7,6 +7,20 @@ use crate::parse_wabbajack::{
     operations::{ArchiveManifest, ManifestMetadata},
 };
 use crate::downloader::core::{DownloadRequest, DownloadMetadata, DownloadSource};
+use crate::downloader::sources::{HttpArchiveState, NexusArchiveState, GameFileArchiveState, WabbajackCDNArchiveState};
+use crate::install::directives::{
+    FromArchiveDirective,
+    PatchedFromArchiveDirective,
+    InlineFileDirective,
+    RemappedInlineFileDirective,
+    TransformedTextureDirective,
+    CreateBSADirective,
+    MergedPatchDirective,
+    PropertyFileDirective,
+    ArchiveMetaDirective,
+    IgnoredDirectlyDirective,
+    NoMatchDirective,
+};
 use serde::Deserialize;
 use std::path::PathBuf;
 
@@ -35,254 +49,126 @@ pub struct WabbaModlist {
 pub enum Directive {
     /// Extract a file directly from a downloaded archive
     #[serde(rename = "FromArchive")]
-    FromArchive {
-        #[serde(rename = "To")]
-        to: String,
-        #[serde(rename = "Hash")]
-        hash: String,
-        #[serde(rename = "Size")]
-        size: u64,
-        #[serde(rename = "ArchiveHashPath")]
-        archive_hash_path: Vec<String>, // [archive_hash, path, components...]
-    },
+    FromArchive(FromArchiveDirective),
 
     /// Extract a file from archive and apply a binary patch
     #[serde(rename = "PatchedFromArchive")]
-    PatchedFromArchive {
-        #[serde(rename = "To")]
-        to: String,
-        #[serde(rename = "Hash")]
-        hash: String,
-        #[serde(rename = "Size")]
-        size: u64,
-        #[serde(rename = "ArchiveHashPath")]
-        archive_hash_path: Vec<String>,
-        #[serde(rename = "FromHash")]
-        from_hash: String,
-        #[serde(rename = "PatchID")]
-        patch_id: String,
-    },
+    PatchedFromArchive(PatchedFromArchiveDirective),
 
     /// Write embedded data directly to the destination
     #[serde(rename = "InlineFile")]
-    InlineFile {
-        #[serde(rename = "To")]
-        to: String,
-        #[serde(rename = "Hash")]
-        hash: String,
-        #[serde(rename = "Size")]
-        size: u64,
-        #[serde(rename = "SourceDataID")]
-        source_data_id: String,
-    },
+    InlineFile(InlineFileDirective),
 
     /// Write embedded data with path placeholder replacement
     #[serde(rename = "RemappedInlineFile")]
-    RemappedInlineFile {
-        #[serde(rename = "To")]
-        to: String,
-        #[serde(rename = "Hash")]
-        hash: String,
-        #[serde(rename = "Size")]
-        size: u64,
-        #[serde(rename = "SourceDataID")]
-        source_data_id: String,
-    },
+    RemappedInlineFile(RemappedInlineFileDirective),
 
     /// Extract texture and apply format/compression changes
     #[serde(rename = "TransformedTexture")]
-    TransformedTexture {
-        #[serde(rename = "To")]
-        to: String,
-        #[serde(rename = "Hash")]
-        hash: String,
-        #[serde(rename = "Size")]
-        size: u64,
-        #[serde(rename = "ArchiveHashPath")]
-        archive_hash_path: Vec<String>,
-        #[serde(rename = "ImageState")]
-        image_state: serde_json::Value, // Complex object, use Value for now
-    },
+    TransformedTexture(TransformedTextureDirective),
 
     /// Build BSA/BA2 archive files from loose files
     #[serde(rename = "CreateBSA")]
-    CreateBSA {
-        #[serde(rename = "To")]
-        to: String,
-        #[serde(rename = "Hash")]
-        hash: String,
-        #[serde(rename = "Size")]
-        size: u64,
-        #[serde(rename = "TempID")]
-        temp_id: String,
-        #[serde(rename = "State")]
-        state: serde_json::Value, // Archive format configuration
-        #[serde(rename = "FileStates")]
-        file_states: Vec<serde_json::Value>, // Array of file states
-    },
+    CreateBSA(CreateBSADirective),
 
     /// Create merged plugin files (like zEdit merges)
     #[serde(rename = "MergedPatch")]
-    MergedPatch {
-        #[serde(rename = "To")]
-        to: String,
-        #[serde(rename = "Hash")]
-        hash: String,
-        #[serde(rename = "Size")]
-        size: u64,
-        #[serde(rename = "PatchID")]
-        patch_id: String,
-        #[serde(rename = "Sources")]
-        sources: Vec<SourcePatch>,
-    },
+    MergedPatch(MergedPatchDirective),
 
     /// Modlist metadata files (banner, readme)
     #[serde(rename = "PropertyFile")]
-    PropertyFile {
-        #[serde(rename = "To")]
-        to: String,
-        #[serde(rename = "Hash")]
-        hash: String,
-        #[serde(rename = "Size")]
-        size: u64,
-        #[serde(rename = "SourceDataID")]
-        source_data_id: String,
-        #[serde(rename = "Type")]
-        property_type: PropertyType,
-    },
+    PropertyFile(PropertyFileDirective),
 
     /// Create .meta files for Mod Organizer 2
     #[serde(rename = "ArchiveMeta")]
-    ArchiveMeta {
-        #[serde(rename = "To")]
-        to: String,
-        #[serde(rename = "Hash")]
-        hash: String,
-        #[serde(rename = "Size")]
-        size: u64,
-        #[serde(rename = "SourceDataID")]
-        source_data_id: String,
-    },
+    ArchiveMeta(ArchiveMetaDirective),
 
     /// Files explicitly ignored during compilation (shouldn't appear in final modlist)
     #[serde(rename = "IgnoredDirectly")]
-    IgnoredDirectly {
-        #[serde(rename = "To")]
-        to: String,
-        #[serde(rename = "Hash")]
-        hash: String,
-        #[serde(rename = "Size")]
-        size: u64,
-        #[serde(rename = "Reason")]
-        reason: String,
-    },
+    IgnoredDirectly(IgnoredDirectlyDirective),
 
     /// Files that couldn't be matched during compilation (shouldn't appear in final modlist)
     #[serde(rename = "NoMatch")]
-    NoMatch {
-        #[serde(rename = "To")]
-        to: String,
-        #[serde(rename = "Hash")]
-        hash: String,
-        #[serde(rename = "Size")]
-        size: u64,
-        #[serde(rename = "Reason")]
-        reason: String,
-    },
+    NoMatch(NoMatchDirective),
 }
 
-/// Source patch information for merged patches
-#[derive(Debug, Deserialize, Clone)]
-pub struct SourcePatch {
-    #[serde(rename = "Hash")]
-    pub hash: String,
-    #[serde(rename = "RelativePath")]
-    pub relative_path: String,
-}
-
-/// Property file types
-#[derive(Debug, Deserialize, Clone)]
-pub enum PropertyType {
-    Banner,
-    Readme,
-}
 
 impl Directive {
     /// Get the destination path for any directive type
     pub fn to(&self) -> &str {
         match self {
-            Directive::FromArchive { to, .. } => to,
-            Directive::PatchedFromArchive { to, .. } => to,
-            Directive::InlineFile { to, .. } => to,
-            Directive::RemappedInlineFile { to, .. } => to,
-            Directive::TransformedTexture { to, .. } => to,
-            Directive::CreateBSA { to, .. } => to,
-            Directive::MergedPatch { to, .. } => to,
-            Directive::PropertyFile { to, .. } => to,
-            Directive::ArchiveMeta { to, .. } => to,
-            Directive::IgnoredDirectly { to, .. } => to,
-            Directive::NoMatch { to, .. } => to,
+            Directive::FromArchive(d) => &d.to,
+            Directive::PatchedFromArchive(d) => &d.to,
+            Directive::InlineFile(d) => &d.to,
+            Directive::RemappedInlineFile(d) => &d.to,
+            Directive::TransformedTexture(d) => &d.to,
+            Directive::CreateBSA(d) => &d.to,
+            Directive::MergedPatch(d) => &d.to,
+            Directive::PropertyFile(d) => &d.to,
+            Directive::ArchiveMeta(d) => &d.to,
+            Directive::IgnoredDirectly(d) => &d.to,
+            Directive::NoMatch(d) => &d.to,
         }
     }
 
     /// Get the content hash for any directive type
     pub fn hash(&self) -> &str {
         match self {
-            Directive::FromArchive { hash, .. } => hash,
-            Directive::PatchedFromArchive { hash, .. } => hash,
-            Directive::InlineFile { hash, .. } => hash,
-            Directive::RemappedInlineFile { hash, .. } => hash,
-            Directive::TransformedTexture { hash, .. } => hash,
-            Directive::CreateBSA { hash, .. } => hash,
-            Directive::MergedPatch { hash, .. } => hash,
-            Directive::PropertyFile { hash, .. } => hash,
-            Directive::ArchiveMeta { hash, .. } => hash,
-            Directive::IgnoredDirectly { hash, .. } => hash,
-            Directive::NoMatch { hash, .. } => hash,
+            Directive::FromArchive(d) => &d.hash,
+            Directive::PatchedFromArchive(d) => &d.hash,
+            Directive::InlineFile(d) => &d.hash,
+            Directive::RemappedInlineFile(d) => &d.hash,
+            Directive::TransformedTexture(d) => &d.hash,
+            Directive::CreateBSA(d) => &d.hash,
+            Directive::MergedPatch(d) => &d.hash,
+            Directive::PropertyFile(d) => &d.hash,
+            Directive::ArchiveMeta(d) => &d.hash,
+            Directive::IgnoredDirectly(d) => &d.hash,
+            Directive::NoMatch(d) => &d.hash,
         }
     }
 
     /// Get the file size for any directive type
     pub fn size(&self) -> u64 {
         match self {
-            Directive::FromArchive { size, .. } => *size,
-            Directive::PatchedFromArchive { size, .. } => *size,
-            Directive::InlineFile { size, .. } => *size,
-            Directive::RemappedInlineFile { size, .. } => *size,
-            Directive::TransformedTexture { size, .. } => *size,
-            Directive::CreateBSA { size, .. } => *size,
-            Directive::MergedPatch { size, .. } => *size,
-            Directive::PropertyFile { size, .. } => *size,
-            Directive::ArchiveMeta { size, .. } => *size,
-            Directive::IgnoredDirectly { size, .. } => *size,
-            Directive::NoMatch { size, .. } => *size,
+            Directive::FromArchive(d) => d.size,
+            Directive::PatchedFromArchive(d) => d.size,
+            Directive::InlineFile(d) => d.size,
+            Directive::RemappedInlineFile(d) => d.size,
+            Directive::TransformedTexture(d) => d.size,
+            Directive::CreateBSA(d) => d.size,
+            Directive::MergedPatch(d) => d.size,
+            Directive::PropertyFile(d) => d.size,
+            Directive::ArchiveMeta(d) => d.size,
+            Directive::IgnoredDirectly(d) => d.size,
+            Directive::NoMatch(d) => d.size,
         }
     }
 
     /// Check if this directive requires VFS (archive-based installation)
     pub fn requires_vfs(&self) -> bool {
         matches!(self,
-            Directive::FromArchive { .. } |
-            Directive::PatchedFromArchive { .. } |
-            Directive::TransformedTexture { .. }
+            Directive::FromArchive(_) |
+            Directive::PatchedFromArchive(_) |
+            Directive::TransformedTexture(_)
         )
     }
 
     /// Check if this directive is an inline file (embedded data)
     pub fn is_inline(&self) -> bool {
         matches!(self,
-            Directive::InlineFile { .. } |
-            Directive::RemappedInlineFile { .. } |
-            Directive::PropertyFile { .. } |
-            Directive::ArchiveMeta { .. }
+            Directive::InlineFile(_) |
+            Directive::RemappedInlineFile(_) |
+            Directive::PropertyFile(_) |
+            Directive::ArchiveMeta(_)
         )
     }
 
     /// Check if this directive should be processed during installation
     pub fn should_install(&self) -> bool {
         !matches!(self,
-            Directive::IgnoredDirectly { .. } |
-            Directive::NoMatch { .. }
+            Directive::IgnoredDirectly(_) |
+            Directive::NoMatch(_)
         )
     }
 }
@@ -311,52 +197,16 @@ pub struct Archive {
 #[serde(tag = "$type")]
 pub enum ArchiveState {
     #[serde(rename = "HttpDownloader, Wabbajack.Lib")]
-    Http {
-        #[serde(rename = "Url")]
-        url: String,
-        #[serde(rename = "Headers", default)]
-        headers: Vec<String>,
-    },
+    Http(HttpArchiveState),
 
     #[serde(rename = "NexusDownloader, Wabbajack.Lib")]
-    Nexus {
-        #[serde(rename = "ModID")]
-        mod_id: u32,
-        #[serde(rename = "FileID")]
-        file_id: u32,
-        #[serde(rename = "GameName")]
-        game_name: String,
-        #[serde(rename = "Name")]
-        name: String,
-        #[serde(rename = "Author")]
-        author: Option<String>,
-        #[serde(rename = "Version")]
-        version: String,
-        #[serde(rename = "Description")]
-        description: String,
-        #[serde(rename = "IsNSFW")]
-        is_nsfw: bool,
-        #[serde(rename = "ImageURL")]
-        image_url: Option<String>,
-    },
+    Nexus(NexusArchiveState),
 
     #[serde(rename = "GameFileSourceDownloader, Wabbajack.Lib")]
-    GameFile {
-        #[serde(rename = "Game")]
-        game: String,
-        #[serde(rename = "GameFile")]
-        game_file: String,
-        #[serde(rename = "GameVersion")]
-        game_version: String,
-        #[serde(rename = "Hash")]
-        hash: String,
-    },
+    GameFile(GameFileArchiveState),
 
     #[serde(rename = "WabbajackCDNDownloader+State, Wabbajack.Lib")]
-    WabbajackCDN {
-        #[serde(rename = "Url")]
-        url: String,
-    },
+    WabbajackCDN(WabbajackCDNArchiveState),
 
     // Handle unknown downloader types gracefully
     #[serde(other)]

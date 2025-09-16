@@ -15,6 +15,13 @@ use crate::downloader::core::{
     DownloadError, ValidationType, ProgressEvent
 };
 
+/// Raw WabbajackCDN archive state from JSON parsing
+#[derive(Debug, Deserialize, Clone)]
+pub struct WabbajackCDNArchiveState {
+    #[serde(rename = "Url")]
+    pub url: String,
+}
+
 /// Wabbajack CDN download source
 #[derive(Debug, Clone, PartialEq)]
 pub struct WabbajackCDNSource {
