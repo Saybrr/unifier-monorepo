@@ -8,3 +8,4 @@ w
 wabbajack/
 .env
 examples/downloads/*
+downloader.log
