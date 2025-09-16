@@ -8,11 +8,10 @@ use std::path::Path;
 use tokio::fs;
 use tokio::io::{AsyncWriteExt, AsyncSeekExt};
 use tracing::debug;
-use base64::{Engine as _, engine::general_purpose};
 
 use crate::downloader::core::{
     DownloadRequest, DownloadResult, ProgressCallback, Result,
-    DownloadError, ValidationType, ProgressEvent,files::check_existing_file
+    DownloadError, ProgressEvent, files::check_existing_file
 };
 
 /// Raw WabbajackCDN archive state from JSON parsing
@@ -79,10 +78,11 @@ impl WabbajackCDNSource {
         // Download the chunked file
         let final_size = self.download_chunked_file(&dest_path, progress_callback.clone(), Some(request.expected_size)).await?;
 
-        // Validate the complete assembled file using custom WabbajackCDN validation
-        self.validate_wabbajack_file(&dest_path, &request.validation, progress_callback).await?;
-
-        Ok(DownloadResult::Downloaded { size: final_size })
+        // Return result with file path for centralized validation
+        Ok(DownloadResult::Downloaded {
+            size: final_size,
+            file_path: dest_path
+        })
     }
 
     // Move helper methods to the same impl block
@@ -224,50 +224,6 @@ impl WabbajackCDNSource {
         Ok(total_size)
     }
 
-    /// Validate WabbajackCDN file with base64-encoded xxHash64 hash
-    async fn validate_wabbajack_file(
-        &self,
-        file_path: &Path,
-        validation: &crate::downloader::core::FileValidation,
-        progress_callback: Option<ProgressCallback>
-    ) -> Result<()> {
-        // Only validate if we have an xxHash64 hash (WabbajackCDN now uses xxHash64 hashes in base64 format)
-        if let Some(ref expected_hash_base64) = validation.xxhash64_base64 {
-            // Read and hash the file
-            let file_data = fs::read(file_path).await?;
-
-            // Compute xxHash64 hash
-            let computed_hash = xxhash_rust::xxh64::xxh64(&file_data, 0);
-
-            // Convert computed hash to base64 (WabbajackCDN format)
-            let computed_hash_bytes = computed_hash.to_le_bytes();
-            let computed_hash_base64 = general_purpose::STANDARD.encode(&computed_hash_bytes);
-
-            // Compare base64 hashes
-            if &computed_hash_base64 != expected_hash_base64 {
-                // Delete the invalid file
-                let _ = fs::remove_file(file_path).await;
-
-                return Err(DownloadError::ValidationFailed {
-                    file: file_path.to_path_buf(),
-                    validation_type: ValidationType::XxHash64,
-                    expected: expected_hash_base64.clone(),
-                    actual: computed_hash_base64,
-                    suggestion: "File may be corrupted, try downloading again".to_string()
-                });
-            }
-
-            // Report validation success
-            if let Some(ref callback) = progress_callback {
-                callback(ProgressEvent::ValidationComplete {
-                    file: file_path.display().to_string(),
-                    valid: true,
-                });
-            }
-        }
-
-        Ok(())
-    }
 
 }
 

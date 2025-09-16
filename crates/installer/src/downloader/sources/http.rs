@@ -7,7 +7,7 @@ use serde::Deserialize;
 
 use crate::downloader::core::{
     DownloadRequest, DownloadResult, ProgressCallback, Result,
-    DownloadError, ValidationType, ProgressEvent
+    ProgressEvent
 };
 use crate::downloader::core::http::HttpClient;
 use crate::downloader::core::files::check_existing_file;
@@ -52,34 +52,11 @@ impl HttpSource {
         // Download the file using centralized logic
         let size = self.download_with_mirrors(&dest_path, progress_callback.clone(), Some(request.expected_size), config).await?;
 
-        // Validate the downloaded file (only if validation is specified)
-            debug!("Validating HTTP downloaded file: {} (expected_size: {:?})",
-                   dest_path.display(), request.validation.expected_size);
-
-            match request.validation.validate_file(&dest_path, progress_callback).await {
-                Ok(true) => {
-                    debug!("HTTP file validation passed");
-                },
-                Ok(false) => {
-                    // This shouldn't happen as validate_file returns Err for failures
-                    tokio::fs::remove_file(&dest_path).await?;
-                    return Err(DownloadError::ValidationFailed {
-                        file: dest_path.clone(),
-                        validation_type: ValidationType::Size,
-                        expected: "valid file".to_string(),
-                        actual: "invalid file".to_string(),
-                        suggestion: "Check file integrity or download again".to_string(),
-                    });
-                },
-                Err(e) => {
-                    // Log the specific validation error (like SizeMismatch)
-                    debug!("HTTP file validation failed with error: {}", e);
-                    tokio::fs::remove_file(&dest_path).await?;
-                    return Err(e); // Propagate the specific error (e.g., SizeMismatch)
-            }
-        }
-
-        Ok(DownloadResult::Downloaded { size })
+        // Return result with file path for centralized validation
+        Ok(DownloadResult::Downloaded {
+            size,
+            file_path: dest_path
+        })
     }
 
 }

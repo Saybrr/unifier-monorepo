@@ -10,6 +10,7 @@ use crate::{
 use crate::downloader::{Downloader, DownloadConfig, ProgressCallback};
 use crate::integrations::progress::DashboardProgressReporter;
 use crate::IntoProgressCallback;
+use crate::downloader::core::DownloadResult;
 
 /// Options for modlist downloading
 #[derive(Debug, Clone)]
@@ -121,6 +122,7 @@ impl ModlistDownloader {
         ).await;
 
         // Process results
+        //TODO: Examine this logic and make sure its correct
         let mut successful_downloads = 0;
         let mut failed_downloads = 0;
         let mut total_bytes_downloaded = 0;
@@ -128,19 +130,19 @@ impl ModlistDownloader {
         let mut skipped_downloads = 0;
         for result in results {
             match result {
-                Ok(download_result) => {
-                    match download_result {
-                        crate::DownloadResult::Downloaded { size } |
-                        crate::DownloadResult::AlreadyExists { size } |
-                        crate::DownloadResult::Resumed { size } => {
+                Ok(verified_dl_result) => {
+                    match verified_dl_result.download_result {
+                        DownloadResult::Downloaded { size, .. } |
+                        DownloadResult::AlreadyExists { size, .. } |
+                        DownloadResult::Resumed { size, .. } => {
                             total_bytes_downloaded += size;
                             successful_downloads += 1;
                         }
-                        crate::DownloadResult::DownloadedPendingValidation { size, .. } => {
+                        DownloadResult::DownloadedPendingValidation { size, .. } => {
                             total_bytes_downloaded += size;
                         }
 
-                        crate::DownloadResult::Skipped { reason: _ } => {
+                        DownloadResult::Skipped { reason: _ } => {
                             skipped_downloads += 1;
                         }
                     }
@@ -157,7 +159,7 @@ impl ModlistDownloader {
         Ok(ModlistDownloadResult {
             successful_downloads,
             failed_downloads,
-            skipped_downloads: skipped_downloads, // TODO: Track skipped downloads
+            skipped_downloads: skipped_downloads,
             total_bytes_downloaded,
             elapsed_time,
             total_requests: download_requests.len(),

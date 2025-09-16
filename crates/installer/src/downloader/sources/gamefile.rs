@@ -8,7 +8,7 @@ use serde::Deserialize;
 
 use crate::downloader::core::{
     DownloadRequest, DownloadResult, ProgressCallback, Result,
-    DownloadError, ValidationType, ProgressEvent, files::check_existing_file
+    DownloadError, ProgressEvent, files::check_existing_file
 };
 
 /// Raw GameFile archive state from JSON parsing
@@ -69,34 +69,11 @@ impl GameFileSource {
         // Copy the file
         let size = self.copy_file_with_progress(&source_path, &dest_path, progress_callback.clone()).await?;
 
-        // Validate the copied file (only if validation is specified)
-            debug!("Validating copied game file: {} (expected_size: {:?})",
-                   dest_path.display(), request.validation.expected_size);
-
-            match request.validation.validate_file(&dest_path, progress_callback).await {
-                Ok(true) => {
-                    debug!("Game file validation passed");
-                },
-                Ok(false) => {
-                    // This shouldn't happen as validate_file returns Err for failures
-                    fs::remove_file(&dest_path).await?;
-                    return Err(DownloadError::ValidationFailed {
-                        file: dest_path.clone(),
-                        validation_type: ValidationType::Size,
-                        expected: "valid file".to_string(),
-                        actual: "invalid file".to_string(),
-                        suggestion: "Check game file integrity or reinstall the game".to_string(),
-                    });
-                },
-                Err(e) => {
-                    // Log the specific validation error (like SizeMismatch)
-                    debug!("Game file validation failed with error: {}", e);
-                    fs::remove_file(&dest_path).await?;
-                    return Err(e); // Propagate the specific error (e.g., SizeMismatch)
-            }
-        }
-
-        Ok(DownloadResult::Downloaded { size })
+        // Return result with file path for centralized validation
+        Ok(DownloadResult::Downloaded {
+            size,
+            file_path: dest_path
+        })
     }
 
 }
