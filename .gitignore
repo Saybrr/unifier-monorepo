@@ -4,8 +4,7 @@ multifiledownloader-rs/
 /NolvusDashboard
 downloads/*
 /downloads
-w
 wabbajack/
 .env
 examples/downloads/*
-downloader.log
+/downloader.log
