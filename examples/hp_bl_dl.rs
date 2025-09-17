@@ -53,6 +53,15 @@ async fn main() -> Result<()> {
     let result = downloader.download().await?;
 
     // ===========================================
+    // Install the modlist
+    // ===========================================
+    // let installer = ModlistInstaller::new(
+    //     "Baseline/modlist",
+    //     "./install",
+    // );
+    // let result = installer.install().await?;
+
+    // ===========================================
     // Results and Statistics (built-in!)
     // ===========================================
 

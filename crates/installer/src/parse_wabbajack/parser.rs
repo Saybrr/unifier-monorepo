@@ -56,7 +56,9 @@ impl WabbaModlist {
         Ok(requests)
     }
 
+
 }
+
 
 /// Raw directive entry from the JSON
 #[derive(Debug, Deserialize, Clone)]
@@ -107,86 +109,6 @@ pub enum Directive {
     NoMatch(NoMatchDirective),
 }
 
-
-impl Directive {
-    /// Get the destination path for any directive type
-    pub fn to(&self) -> &str {
-        match self {
-            Directive::FromArchive(d) => &d.to,
-            Directive::PatchedFromArchive(d) => &d.to,
-            Directive::InlineFile(d) => &d.to,
-            Directive::RemappedInlineFile(d) => &d.to,
-            Directive::TransformedTexture(d) => &d.to,
-            Directive::CreateBSA(d) => &d.to,
-            Directive::MergedPatch(d) => &d.to,
-            Directive::PropertyFile(d) => &d.to,
-            Directive::ArchiveMeta(d) => &d.to,
-            Directive::IgnoredDirectly(d) => &d.to,
-            Directive::NoMatch(d) => &d.to,
-        }
-    }
-
-    /// Get the content hash for any directive type
-    pub fn hash(&self) -> &str {
-        match self {
-            Directive::FromArchive(d) => &d.hash,
-            Directive::PatchedFromArchive(d) => &d.hash,
-            Directive::InlineFile(d) => &d.hash,
-            Directive::RemappedInlineFile(d) => &d.hash,
-            Directive::TransformedTexture(d) => &d.hash,
-            Directive::CreateBSA(d) => &d.hash,
-            Directive::MergedPatch(d) => &d.hash,
-            Directive::PropertyFile(d) => &d.hash,
-            Directive::ArchiveMeta(d) => &d.hash,
-            Directive::IgnoredDirectly(d) => &d.hash,
-            Directive::NoMatch(d) => &d.hash,
-        }
-    }
-
-    /// Get the file size for any directive type
-    pub fn size(&self) -> u64 {
-        match self {
-            Directive::FromArchive(d) => d.size,
-            Directive::PatchedFromArchive(d) => d.size,
-            Directive::InlineFile(d) => d.size,
-            Directive::RemappedInlineFile(d) => d.size,
-            Directive::TransformedTexture(d) => d.size,
-            Directive::CreateBSA(d) => d.size,
-            Directive::MergedPatch(d) => d.size,
-            Directive::PropertyFile(d) => d.size,
-            Directive::ArchiveMeta(d) => d.size,
-            Directive::IgnoredDirectly(d) => d.size,
-            Directive::NoMatch(d) => d.size,
-        }
-    }
-
-    /// Check if this directive requires VFS (archive-based installation)
-    pub fn requires_vfs(&self) -> bool {
-        matches!(self,
-            Directive::FromArchive(_) |
-            Directive::PatchedFromArchive(_) |
-            Directive::TransformedTexture(_)
-        )
-    }
-
-    /// Check if this directive is an inline file (embedded data)
-    pub fn is_inline(&self) -> bool {
-        matches!(self,
-            Directive::InlineFile(_) |
-            Directive::RemappedInlineFile(_) |
-            Directive::PropertyFile(_) |
-            Directive::ArchiveMeta(_)
-        )
-    }
-
-    /// Check if this directive should be processed during installation
-    pub fn should_install(&self) -> bool {
-        !matches!(self,
-            Directive::IgnoredDirectly(_) |
-            Directive::NoMatch(_)
-        )
-    }
-}
 
 /// Raw archive entry from the JSON
 #[derive(Debug, Deserialize, Clone)]
