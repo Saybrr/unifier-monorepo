@@ -4,6 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::sync::Arc;
 use crate::install::error::InstallError;
 
 /// Property file types
@@ -54,9 +55,9 @@ impl PropertyFileDirective {
     /// Execute the directive - write property file to destination
     pub async fn execute(
         &self,
-        install_dir: &PathBuf,
-        extracted_modlist_dir: &PathBuf,
-        _progress_callback: Option<Box<dyn Fn(u64, u64)>>,
+        install_dir: &Arc<PathBuf>,
+        extracted_modlist_dir: &Arc<PathBuf>,
+        _progress_callback: Option<Box<dyn Fn(u64, u64) + Send + Sync>>,
     ) -> Result<(), InstallError> {
         // TODO: Implement property file writing logic
         // 1. Load data from extracted_modlist_dir + self.source_data_id

@@ -4,6 +4,7 @@
 
 pub mod directives;
 pub mod error;
+pub mod lib;
 
 // Re-export commonly used types
 pub use directives::{Directive, FromArchiveDirective, PatchedFromArchiveDirective, InlineFileDirective};

@@ -4,6 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::sync::Arc;
 use crate::install::error::InstallError;
 
 /// Extract a file directly from a downloaded archive
@@ -37,9 +38,9 @@ impl FromArchiveDirective {
     /// Execute the directive - extract file from archive to destination
     pub async fn execute(
         &self,
-        install_dir: &PathBuf,
+        install_dir: &Arc<PathBuf>,
         _vfs_context: &(), // TODO: Replace with actual VFS type
-        _progress_callback: Option<Box<dyn Fn(u64, u64)>>,
+        _progress_callback: Option<Box<dyn Fn(u64, u64) + Send + Sync>>,
     ) -> Result<(), InstallError> {
         // TODO: Implement archive extraction logic
         // 1. Use VFS to locate the file in the archive

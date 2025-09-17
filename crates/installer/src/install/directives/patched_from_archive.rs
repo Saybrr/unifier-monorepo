@@ -4,6 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::sync::Arc;
 use crate::install::error::InstallError;
 
 /// Extract a file from archive and apply a binary patch
@@ -52,10 +53,10 @@ impl PatchedFromArchiveDirective {
     /// Execute the directive - extract file, apply patch, write to destination
     pub async fn execute(
         &self,
-        install_dir: &PathBuf,
+        install_dir: &Arc<PathBuf>,
         _vfs_context: &(), // TODO: Replace with actual VFS type
-        _extracted_modlist_dir: &PathBuf,
-        _progress_callback: Option<Box<dyn Fn(u64, u64)>>,
+        _extracted_modlist_dir: &Arc<PathBuf>,
+        _progress_callback: Option<Box<dyn Fn(u64, u64) + Send + Sync>>,
     ) -> Result<(), InstallError> {
         // TODO: Implement patched extraction logic
         // 1. Use VFS to locate and extract source file from archive

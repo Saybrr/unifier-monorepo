@@ -4,6 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::sync::Arc;
 use crate::install::error::InstallError;
 
 /// Extract texture and apply format/compression changes
@@ -47,9 +48,9 @@ impl TransformedTextureDirective {
     /// Execute the directive - extract texture, apply transformations, write to destination
     pub async fn execute(
         &self,
-        install_dir: &PathBuf,
+        install_dir: &Arc<PathBuf>,
         _vfs_context: &(), // TODO: Replace with actual VFS type
-        _progress_callback: Option<Box<dyn Fn(u64, u64)>>,
+        _progress_callback: Option<Box<dyn Fn(u64, u64) + Send + Sync>>,
     ) -> Result<(), InstallError> {
         // TODO: Implement texture transformation logic
         // 1. Use VFS to locate and extract source texture from archive

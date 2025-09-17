@@ -4,6 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::sync::Arc;
 use crate::install::error::InstallError;
 
 /// Write embedded data with path placeholder replacement
@@ -37,11 +38,11 @@ impl RemappedInlineFileDirective {
     /// Execute the directive - write embedded data with path remapping to destination
     pub async fn execute(
         &self,
-        install_dir: &PathBuf,
-        extracted_modlist_dir: &PathBuf,
-        _game_dir: &PathBuf,
-        _downloads_dir: &PathBuf,
-        _progress_callback: Option<Box<dyn Fn(u64, u64)>>,
+        install_dir: &Arc<PathBuf>,
+        extracted_modlist_dir: &Arc<PathBuf>,
+        _game_dir: &Arc<PathBuf>,
+        _downloads_dir: &Arc<PathBuf>,
+        _progress_callback: Option<Box<dyn Fn(u64, u64) + Send + Sync>>,
     ) -> Result<(), InstallError> {
         // TODO: Implement remapped inline file writing logic
         // 1. Load data from extracted_modlist_dir + self.source_data_id as string
@@ -60,7 +61,7 @@ impl RemappedInlineFileDirective {
     }
 
     /// Get the path magic replacements that will be applied
-    pub fn get_path_replacements(&self, install_dir: &PathBuf, game_dir: &PathBuf, downloads_dir: &PathBuf) -> Vec<(String, String)> {
+    pub fn get_path_replacements(&self, install_dir: &Arc<PathBuf>, game_dir: &Arc<PathBuf>, downloads_dir: &Arc<PathBuf>) -> Vec<(String, String)> {
         vec![
             ("{GAME_PATH_MAGIC_BACK}".to_string(), game_dir.display().to_string()),
             ("{GAME_PATH_MAGIC_DOUBLE_BACK}".to_string(), game_dir.display().to_string().replace("\\", "\\\\")),

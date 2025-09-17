@@ -4,6 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::sync::Arc;
 use crate::install::error::InstallError;
 
 /// Build BSA/BA2 archive files from loose files
@@ -52,9 +53,9 @@ impl CreateBSADirective {
     /// Execute the directive - build BSA/BA2 archive from loose files
     pub async fn execute(
         &self,
-        install_dir: &PathBuf,
-        _temp_dir: &PathBuf,
-        _progress_callback: Option<Box<dyn Fn(u64, u64)>>,
+        install_dir: &Arc<PathBuf>,
+        _temp_dir: &Arc<PathBuf>,
+        _progress_callback: Option<Box<dyn Fn(u64, u64) + Send + Sync>>,
     ) -> Result<(), InstallError> {
         // TODO: Implement BSA/BA2 creation logic
         // 1. Locate source files in temp_dir + self.temp_id

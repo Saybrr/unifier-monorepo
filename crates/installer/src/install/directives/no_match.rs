@@ -4,6 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::sync::Arc;
 use crate::install::error::InstallError;
 
 /// Files that couldn't be matched during compilation
@@ -37,8 +38,8 @@ impl NoMatchDirective {
     /// Execute the directive - this should normally indicate an error
     pub async fn execute(
         &self,
-        _install_dir: &PathBuf,
-        _progress_callback: Option<Box<dyn Fn(u64, u64)>>,
+        _install_dir: &Arc<PathBuf>,
+        _progress_callback: Option<Box<dyn Fn(u64, u64) + Send + Sync>>,
     ) -> Result<(), InstallError> {
         // TODO: Handle no-match files
         // This directive type should normally not appear in final modlists
