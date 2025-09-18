@@ -6,10 +6,11 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Arc;
 use crate::install::error::InstallError;
+use crate::install::vfs::VfsContext;
 
 /// Extract a file from archive and apply a binary patch
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PatchedFromArchiveDirective {
+pub struct PatchedFromArchive {
     /// Destination path relative to install directory
     #[serde(rename = "To")]
     pub to: String,
@@ -30,7 +31,7 @@ pub struct PatchedFromArchiveDirective {
     pub patch_id: String,
 }
 
-impl PatchedFromArchiveDirective {
+impl PatchedFromArchive {
     /// Create a new PatchedFromArchive directive
     pub fn new(
         to: String,
@@ -54,7 +55,7 @@ impl PatchedFromArchiveDirective {
     pub async fn execute(
         &self,
         install_dir: &Arc<PathBuf>,
-        _vfs_context: &(), // TODO: Replace with actual VFS type
+        _vfs_context: Option<Arc<VfsContext>>,
         _extracted_modlist_dir: &Arc<PathBuf>,
         _progress_callback: Option<Box<dyn Fn(u64, u64) + Send + Sync>>,
     ) -> Result<(), InstallError> {
@@ -66,10 +67,11 @@ impl PatchedFromArchiveDirective {
         // 5. Write patched result to install_dir + self.to
         // 6. Verify final hash matches self.hash
         // 7. Update progress via callback
-
+        dbg!("patched from archive");
         let _destination = install_dir.join(&self.to);
 
-        todo!("Implement PatchedFromArchive directive execution")
+    //    todo!("Implement PatchedFromArchive directive execution")
+        Ok(())
     }
 
     /// Get the archive hash (first element of archive_hash_path)

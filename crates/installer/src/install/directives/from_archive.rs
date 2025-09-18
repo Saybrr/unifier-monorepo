@@ -6,10 +6,10 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Arc;
 use crate::install::error::InstallError;
-
+use crate::install::vfs::VfsContext;
 /// Extract a file directly from a downloaded archive
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FromArchiveDirective {
+pub struct FromArchive {
     /// Destination path relative to install directory
     #[serde(rename = "To")]
     pub to: String,
@@ -24,7 +24,7 @@ pub struct FromArchiveDirective {
     pub archive_hash_path: Vec<String>,
 }
 
-impl FromArchiveDirective {
+impl FromArchive {
     /// Create a new FromArchive directive
     pub fn new(to: String, hash: String, size: u64, archive_hash_path: Vec<String>) -> Self {
         Self {
@@ -39,7 +39,8 @@ impl FromArchiveDirective {
     pub async fn execute(
         &self,
         install_dir: &Arc<PathBuf>,
-        _vfs_context: &(), // TODO: Replace with actual VFS type
+        _extracted_modlist_dir: &Arc<PathBuf>,
+        _vfs_context: Option<Arc<VfsContext>>,
         _progress_callback: Option<Box<dyn Fn(u64, u64) + Send + Sync>>,
     ) -> Result<(), InstallError> {
         // TODO: Implement archive extraction logic
@@ -49,8 +50,9 @@ impl FromArchiveDirective {
         // 4. Update progress via callback
 
         let _destination = install_dir.join(&self.to);
-
-        todo!("Implement FromArchive directive execution")
+        dbg!("from archive");
+        //todo!("Implement FromArchive directive execution")
+        Ok(())
     }
 
     /// Get the archive hash (first element of archive_hash_path)
@@ -67,3 +69,4 @@ impl FromArchiveDirective {
         }
     }
 }
+

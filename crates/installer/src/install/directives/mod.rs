@@ -17,10 +17,11 @@ pub mod property_file;
 pub mod archive_meta;
 pub mod ignored_directly;
 pub mod no_match;
+pub mod test_directive;
 
 // Re-export all directive types for cleaner imports
-pub use from_archive::FromArchiveDirective;
-pub use patched_from_archive::PatchedFromArchiveDirective;
+pub use from_archive::FromArchive;
+pub use patched_from_archive::PatchedFromArchive;
 pub use inline_file::InlineFileDirective;
 pub use remapped_inline_file::RemappedInlineFileDirective;
 pub use transformed_texture::TransformedTextureDirective;
@@ -30,13 +31,15 @@ pub use property_file::{PropertyFileDirective, PropertyType};
 pub use archive_meta::ArchiveMetaDirective;
 pub use ignored_directly::IgnoredDirectlyDirective;
 pub use no_match::NoMatchDirective;
+pub use test_directive::TestDirective;
+
 
 /// Unified directive enum for type-safe directive processing
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(from = "crate::parse_wabbajack::parser::Directive")]
 pub enum Directive {
-    FromArchive(FromArchiveDirective),
-    PatchedFromArchive(PatchedFromArchiveDirective),
+    FromArchive(FromArchive),
+    PatchedFromArchive(PatchedFromArchive),
     InlineFile(InlineFileDirective),
     RemappedInlineFile(RemappedInlineFileDirective),
     TransformedTexture(TransformedTextureDirective),
@@ -46,6 +49,7 @@ pub enum Directive {
     ArchiveMeta(ArchiveMetaDirective),
     IgnoredDirectly(IgnoredDirectlyDirective),
     NoMatch(NoMatchDirective),
+    Test(TestDirective),
 }
 
 impl Directive {
@@ -63,6 +67,7 @@ impl Directive {
             Directive::ArchiveMeta(d) => &d.to,
             Directive::IgnoredDirectly(d) => &d.to,
             Directive::NoMatch(d) => &d.to,
+            Directive::Test(d) => &d.to,
         }
     }
 
@@ -80,6 +85,7 @@ impl Directive {
             Directive::ArchiveMeta(d) => &d.hash,
             Directive::IgnoredDirectly(d) => &d.hash,
             Directive::NoMatch(d) => &d.hash,
+            Directive::Test(d) => &d.hash,
         }
     }
 
@@ -97,38 +103,44 @@ impl Directive {
             Directive::ArchiveMeta(d) => d.size,
             Directive::IgnoredDirectly(d) => d.size,
             Directive::NoMatch(d) => d.size,
+            Directive::Test(d) => d.size,
         }
     }
 
-    /// Check if this directive requires VFS (archive-based installation)
-    pub fn requires_vfs(&self) -> bool {
-        matches!(self,
-            Directive::FromArchive(_) |
-            Directive::PatchedFromArchive(_) |
-            Directive::TransformedTexture(_)
-        )
-    }
+    // /// Check if this directive requires VFS (archive-based installation)
+    // pub fn requires_vfs(&self) -> bool {
+    //     matches!(self,
+    //         Directive::FromArchive(_) |
+    //         Directive::PatchedFromArchive(_) |
+    //         Directive::TransformedTexture(_) |
+    //         Directive::Test(_)
+    //     )
+    // }
 
-    /// Check if this directive is an inline file (embedded data)
-    pub fn is_inline(&self) -> bool {
-        matches!(self,
-            Directive::InlineFile(_) |
-            Directive::RemappedInlineFile(_) |
-            Directive::PropertyFile(_) |
-            Directive::ArchiveMeta(_)
-        )
-    }
+    // /// Check if this directive is an inline file (embedded data)
+    // pub fn is_inline(&self) -> bool {
+    //     matches!(self,
+    //         Directive::InlineFile(_) |
+    //         Directive::RemappedInlineFile(_) |
+    //         Directive::PropertyFile(_) |
+    //         Directive::ArchiveMeta(_) |
+    //         Directive::Test(_)
+    //     )
+    // }
 
-    /// Check if this directive should be processed during installation
-    pub fn should_install(&self) -> bool {
-        !matches!(self,
-            Directive::IgnoredDirectly(_) |
-            Directive::NoMatch(_)
-        )
-    }
+    // /// Check if this directive should be processed during installation
+    // pub fn should_install(&self) -> bool {
+    //     !matches!(self,
+    //         Directive::IgnoredDirectly(_) |
+    //         Directive::NoMatch(_) |
+    //         Directive::Test(_)
+    //     )
+    // }
 }
 
+
 // Conversion from parser directive to installer directive
+
 impl From<crate::parse_wabbajack::parser::Directive> for Directive {
     fn from(parser_directive: crate::parse_wabbajack::parser::Directive) -> Self {
         use crate::parse_wabbajack::parser::Directive as PD;

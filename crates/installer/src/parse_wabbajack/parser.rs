@@ -6,8 +6,8 @@
 use crate::downloader::core::{DownloadRequest,  DownloadSource};
 use crate::downloader::sources::{HttpArchiveState, NexusArchiveState, GameFileArchiveState, WabbajackCDNArchiveState};
 use crate::install::directives::{
-    FromArchiveDirective,
-    PatchedFromArchiveDirective,
+    FromArchive,
+    PatchedFromArchive,
     InlineFileDirective,
     RemappedInlineFileDirective,
     TransformedTextureDirective,
@@ -66,11 +66,11 @@ impl WabbaModlist {
 pub enum Directive {
     /// Extract a file directly from a downloaded archive
     #[serde(rename = "FromArchive")]
-    FromArchive(FromArchiveDirective),
+    FromArchive(FromArchive),
 
     /// Extract a file from archive and apply a binary patch
     #[serde(rename = "PatchedFromArchive")]
-    PatchedFromArchive(PatchedFromArchiveDirective),
+    PatchedFromArchive(PatchedFromArchive),
 
     /// Write embedded data directly to the destination
     #[serde(rename = "InlineFile")]

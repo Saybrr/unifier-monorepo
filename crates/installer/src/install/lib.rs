@@ -54,9 +54,9 @@ use std::time::Instant;
 
 use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
-
-use crate::install::directives::Directive;
 use crate::install::error::InstallError;
+use crate::install::directives::Directive;
+use crate::install::vfs::VfsContext;
 
 /// Progress callback type for installation updates
 pub type ProgressCallback = Arc<dyn Fn(InstallProgress) + Send + Sync>;
@@ -134,11 +134,11 @@ impl Default for InstallerConfig {
 /// Main installer struct that processes directives in parallel
 ///
 /// **Memory Optimization**: Directives are stored as `Arc<Directive>` to minimize
-/// memory usage when cloning for parallel processing. This reduces directive
-/// cloning overhead by ~90% for large modlists.
+/// memory usage when cloning for parallel processing.
 pub struct Installer {
     config: InstallerConfig,
     directives: Vec<Arc<Directive>>,
+    vfs: VfsContext,
     progress_callback: Option<ProgressCallback>,
     cancellation_token: CancellationToken,
 
@@ -150,15 +150,13 @@ pub struct Installer {
 
 impl Installer {
     /// Create a new installer with the given configuration
-    pub fn new(config: InstallerConfig, directives: Vec<Directive>) -> Self {
+    pub fn new(config: InstallerConfig, directives: Vec<Arc<Directive>>, vfs: VfsContext) -> Self {
         let total_bytes = directives.iter().map(|d| d.size()).sum();
-
-        // Wrap directives in Arc for memory-efficient parallel processing
-        let arc_directives: Vec<Arc<Directive>> = directives.into_iter().map(Arc::new).collect();
 
         Self {
             config,
-            directives: arc_directives,
+            directives,
+            vfs,
             progress_callback: None,
             cancellation_token: CancellationToken::new(),
             total_bytes,
@@ -197,32 +195,44 @@ impl Installer {
             return Ok(());
         }
 
-        // Phase 3: Install archive-based files (parallized by archive)
-        self.install_archive_files().await?;
-        if self.cancellation_token.is_cancelled() {
-            return Ok(());
-        }
+        //filter for archive directives
+        // let _archive_directives = self.directives
+        // .iter()
+        // .filter(|d| d.requires_vfs())
+        // .collect::<Vec<_>>();
 
-        // Phase 4: Install inline files (fully parallelized)
-        self.install_inline_files().await?;
-        if self.cancellation_token.is_cancelled() {
-            return Ok(());
-        }
+        // // Phase 3: Install archive-based files (parallized by archive)
+        // self.install_archive_files(archive_directives).await?;
+        // if self.cancellation_token.is_cancelled() {
+        //     return Ok(());
+        // }
 
-        // Phase 5: Create BSA files (sequential per BSA, parallel within)
-        self.create_bsa_files().await?;
-        if self.cancellation_token.is_cancelled() {
-            return Ok(());
-        }
+        // //filter for inline directives
 
-        // Phase 6: Generate patches (parallelized)
-        self.generate_patches().await?;
-        if self.cancellation_token.is_cancelled() {
-            return Ok(());
-        }
+        // // Phase 4: Install inline files (fully parallelized)
+        // self.install_inline_files().await?;
+        // if self.cancellation_token.is_cancelled() {
+        //     return Ok(());
+        // }
 
-        // Phase 7: Finalize installation
-        self.finalize_installation().await?;
+        // //filter for bsa directives
+
+        // // Phase 5: Create BSA files (sequential per BSA, parallel within)
+        // self.create_bsa_files().await?;
+        // if self.cancellation_token.is_cancelled() {
+        //     return Ok(());
+        // }
+
+        // //filter for patch directives
+
+        // // Phase 6: Generate patches (parallelized)
+        // self.generate_patches().await?;
+        // if self.cancellation_token.is_cancelled() {
+        //     return Ok(());
+        // }
+
+        // // Phase 7: Finalize installation
+        // self.finalize_installation().await?;
 
         self.update_progress(InstallPhase::Complete, 7, 7, 0, 0, "Installation completed successfully".to_string());
         Ok(())
@@ -231,16 +241,26 @@ impl Installer {
     /// Phase 1: Prepare installation directories and validate directives
     async fn prepare_installation(&mut self) -> Result<(), InstallError> {
         self.update_progress(InstallPhase::Preparing, 1, 7, 0, 0, "Preparing installation directories".to_string());
-
-        // Create directories
         tokio::fs::create_dir_all(&**self.config.install_dir).await?;
         tokio::fs::create_dir_all(&**self.config.temp_dir).await?;
 
         // Filter out directives that shouldn't be installed
         let total_directives = self.directives.len();
-        self.directives.retain(|d| d.should_install());
+        self.directives.retain(|d| {
+            !matches!(d.as_ref(),
+                Directive::IgnoredDirectly(_) |
+                Directive::NoMatch(_)
+            )
+        });
 
         let filtered_count = total_directives - self.directives.len();
+
+        // for d in self.directives {
+        //     //Prime VFS self
+
+        // }
+
+
         if filtered_count > 0 {
             self.update_progress(
                 InstallPhase::Preparing, 1, 7, filtered_count, total_directives,
@@ -286,74 +306,55 @@ impl Installer {
         Ok(())
     }
 
-    /// Phase 3: Install archive-based files grouped by source archive
+    /// Phase 3: Install archive-based files grouped by directive type
     async fn install_archive_files(&self) -> Result<(), InstallError> {
-        let archive_directives = self.directives
-            .iter()
-            .filter(|d| d.requires_vfs())
-            .collect::<Vec<_>>();
-
-        if archive_directives.is_empty() {
+        if self.directives.is_empty() {
             return Ok(());
         }
 
         self.update_progress(
-            InstallPhase::InstallingArchives, 3, 7, 0, archive_directives.len(),
+            InstallPhase::InstallingArchives, 3, 7, 0, self.directives.len(),
             "Installing files from archives".to_string()
         );
 
-        // Group directives by source archive for efficient extraction
-        let mut archive_groups: HashMap<String, Vec<&Arc<Directive>>> = HashMap::new();
-        for directive in &archive_directives {
-            let archive_hash = match directive.as_ref() {
-                Directive::FromArchive(d) => d.archive_hash().unwrap_or("unknown"),
-                Directive::PatchedFromArchive(d) => d.archive_hash().unwrap_or("unknown"),
-                Directive::TransformedTexture(d) => d.archive_hash().unwrap_or("unknown"),
-                _ => continue,
-            };
-            archive_groups.entry(archive_hash.to_string()).or_insert_with(Vec::new).push(directive);
+        // Group directives by type for efficient processing
+        let mut type_groups: HashMap<std::mem::Discriminant<Directive>, Vec<Arc<Directive>>> = HashMap::new();
+
+        for directive in &self.directives {
+            let discriminant = std::mem::discriminant(directive.as_ref());
+            type_groups.entry(discriminant).or_insert_with(Vec::new).push(Arc::clone(directive));
         }
 
-        // Process each archive group in parallel using tokio::spawn
+        // Process each directive type group in parallel
         let semaphore = Arc::new(Semaphore::new(self.config.max_concurrency));
         let mut tasks = Vec::new();
 
-        for (_archive_hash, directives) in archive_groups {
+        for (_directive_type, directives) in type_groups {
             // Clone all the data needed for the task
             let sem = semaphore.clone();
             let install_dir = self.config.install_dir.clone();
             let extracted_modlist_dir = self.config.extracted_modlist_dir.clone();
             let processed_bytes = self.processed_bytes.clone();
             let cancellation_token = self.cancellation_token.clone();
-
-            // Clone Arc<Directive> references for the task (cheap reference counting)
-            let shared_directives: Vec<Arc<Directive>> = directives.into_iter().map(|d| Arc::clone(d)).collect();
+            let vfs = Arc::new(self.vfs.clone());
 
             let task = tokio::spawn(async move {
                 let _permit = sem.acquire().await.unwrap();
 
-                for directive in shared_directives {
+                for directive in directives {
                     if cancellation_token.is_cancelled() {
                         break;
                     }
 
-                    // Execute the specific directive
+                    // Pattern match on the directive type
                     let result = match directive.as_ref() {
-                        Directive::FromArchive(d) => {
-                            d.execute(&install_dir, &(), None).await
-                        },
-                        Directive::PatchedFromArchive(d) => {
-                            d.execute(&install_dir, &(), &extracted_modlist_dir, None).await
-                        },
-                        Directive::TransformedTexture(d) => {
-                            d.execute(&install_dir, &(), None).await
-                        },
-                        _ => Ok(()),
+                        Directive::FromArchive(d) => d.execute(&install_dir, &extracted_modlist_dir, Some(vfs.clone()), None).await,
+                        Directive::PatchedFromArchive(d) => d.execute(&install_dir, Some(vfs.clone()), &extracted_modlist_dir, None).await,
+                        Directive::Test(_) => Ok(()), // TODO: implement test directive execution
+                        _ => Ok(()), // Other types don't need VFS
                     };
 
-                    if let Err(e) = result {
-                        return Err(e);
-                    }
+                    result.map_err(|e| InstallError::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
 
                     // Update progress
                     {
@@ -368,7 +369,7 @@ impl Installer {
             tasks.push(task);
         }
 
-        // Wait for all archive processing tasks to complete
+        // Wait for all tasks to complete
         let results = futures::future::join_all(tasks).await;
         for result in results {
             result.map_err(|e| InstallError::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))??;
@@ -379,17 +380,13 @@ impl Installer {
 
     /// Phase 4: Install inline files (fully parallelized) - PROPER IMPLEMENTATION
     async fn install_inline_files(&self) -> Result<(), InstallError> {
-        let inline_directives = self.directives
-            .iter()
-            .filter(|d| d.is_inline())
-            .collect::<Vec<_>>();
 
-        if inline_directives.is_empty() {
+        if self.directives.is_empty() {
             return Ok(());
         }
 
         self.update_progress(
-            InstallPhase::InstallingInlineFiles, 4, 7, 0, inline_directives.len(),
+            InstallPhase::InstallingInlineFiles, 4, 7, 0, self.directives.len(),
             "Installing inline files".to_string()
         );
 
@@ -397,18 +394,18 @@ impl Installer {
         let semaphore = Arc::new(Semaphore::new(self.config.max_concurrency));
         let mut tasks = Vec::new();
 
-        for directive in inline_directives {
+        for directive in &self.directives {
             // Clone all the data that needs to be moved into the spawn closure
             let sem = semaphore.clone();
-            let install_dir = self.config.install_dir.clone();
-            let extracted_dir = self.config.extracted_modlist_dir.clone();
-            let game_dir = self.config.game_dir.clone();
-            let downloads_dir = self.config.downloads_dir.clone();
+            let _install_dir = self.config.install_dir.clone();
+            let _extracted_dir = self.config.extracted_modlist_dir.clone();
+            let _game_dir = self.config.game_dir.clone();
+            let _downloads_dir = self.config.downloads_dir.clone();
             let processed_bytes = self.processed_bytes.clone();
             let cancellation_token = self.cancellation_token.clone();
 
             // Clone the Arc reference to move it into the task (cheap reference counting)
-            let directive = Arc::clone(directive);
+            let directive = Arc::clone(&directive);
 
             let task = tokio::spawn(async move {
                 if cancellation_token.is_cancelled() {
@@ -417,21 +414,13 @@ impl Installer {
 
                 let _permit = sem.acquire().await.unwrap();
 
-                // Execute the specific directive
+                // Pattern match on the directive type
                 let result = match directive.as_ref() {
-                    Directive::InlineFile(d) => {
-                        d.execute(&install_dir, &extracted_dir, None).await
-                    },
-                    Directive::RemappedInlineFile(d) => {
-                        d.execute(&install_dir, &extracted_dir, &game_dir, &downloads_dir, None).await
-                    },
-                    Directive::PropertyFile(d) => {
-                        d.execute(&install_dir, &extracted_dir, None).await
-                    },
-                    Directive::ArchiveMeta(d) => {
-                        d.execute(&install_dir, &extracted_dir, None).await
-                    },
-                    _ => Ok(()),
+                    Directive::InlineFile(_) => Ok(()), // TODO: implement
+                    Directive::RemappedInlineFile(_) => Ok(()), // TODO: implement
+                    Directive::PropertyFile(_) => Ok(()), // TODO: implement
+                    Directive::ArchiveMeta(_) => Ok(()), // TODO: implement
+                    _ => Ok(()), // Other types don't need inline processing
                 };
 
                 if let Err(e) = result {
@@ -461,34 +450,34 @@ impl Installer {
 
     /// Phase 5: Create BSA files (sequential per BSA, but parallel within each BSA)
     async fn create_bsa_files(&mut self) -> Result<(), InstallError> {
-        let bsa_directives = self.directives
-            .iter()
-            .filter(|d| matches!(d.as_ref(), Directive::CreateBSA(_)))
-            .collect::<Vec<_>>();
 
-        if bsa_directives.is_empty() {
+        if self.directives.is_empty() {
             return Ok(());
         }
 
         self.update_progress(
-            InstallPhase::CreatingBSAs, 5, 7, 0, bsa_directives.len(),
+            InstallPhase::CreatingBSAs, 5, 7, 0, self.directives.len(),
             "Creating BSA files".to_string()
         );
 
         // Process BSAs sequentially (to avoid resource conflicts), but parallelize within each BSA
-        for directive in bsa_directives {
+        for directive in &self.directives {
             if self.cancellation_token.is_cancelled() {
                 break;
             }
 
-            if let Directive::CreateBSA(bsa_directive) = directive.as_ref() {
-                bsa_directive.execute(&self.config.install_dir, &self.config.temp_dir, None).await?;
+            // Pattern match on the directive type
+            let result: Result<(), InstallError> = match directive.as_ref() {
+                Directive::CreateBSA(_) => Ok(()), // TODO: implement BSA creation
+                _ => Ok(()), // Other types don't create BSAs
+            };
 
-                // Update progress
-                {
-                    let mut bytes = self.processed_bytes.lock().unwrap();
-                    *bytes += directive.size();
-                }
+            result?;
+
+            // Update progress
+            {
+                let mut bytes = self.processed_bytes.lock().unwrap();
+                *bytes += directive.size();
             }
         }
 
@@ -497,17 +486,13 @@ impl Installer {
 
     /// Phase 6: Generate patches (parallelized)
     async fn generate_patches(&mut self) -> Result<(), InstallError> {
-        let patch_directives = self.directives
-            .iter()
-            .filter(|d| matches!(d.as_ref(), Directive::MergedPatch(_)))
-            .collect::<Vec<_>>();
 
-        if patch_directives.is_empty() {
+        if self.directives.is_empty() {
             return Ok(());
         }
 
         self.update_progress(
-            InstallPhase::GeneratingPatches, 6, 7, 0, patch_directives.len(),
+            InstallPhase::GeneratingPatches, 6, 7, 0, self.directives.len(),
             "Generating merged patches".to_string()
         );
 
@@ -515,16 +500,16 @@ impl Installer {
         let semaphore = Arc::new(Semaphore::new(self.config.max_concurrency));
         let mut tasks = Vec::new();
 
-        for directive in patch_directives {
+        for directive in &self.directives {
             // Clone all the data needed for the task
             let sem = semaphore.clone();
-            let install_dir = self.config.install_dir.clone();
-            let extracted_dir = self.config.extracted_modlist_dir.clone();
+            let _install_dir = self.config.install_dir.clone();
+            let _extracted_dir = self.config.extracted_modlist_dir.clone();
             let processed_bytes = self.processed_bytes.clone();
             let cancellation_token = self.cancellation_token.clone();
 
             // Clone the Arc reference to move it into the task (cheap reference counting)
-            let directive = Arc::clone(directive);
+            let directive = Arc::clone(&directive);
 
             let task = tokio::spawn(async move {
                 if cancellation_token.is_cancelled() {
@@ -533,14 +518,18 @@ impl Installer {
 
                 let _permit = sem.acquire().await.unwrap();
 
-                if let Directive::MergedPatch(patch_directive) = directive.as_ref() {
-                    patch_directive.execute(&install_dir, &extracted_dir, None).await?;
+                // Pattern match on the directive type
+                let result: Result<(), InstallError> = match directive.as_ref() {
+                    Directive::MergedPatch(_) => Ok(()), // TODO: implement patch generation
+                    _ => Ok(()), // Other types don't generate patches
+                };
 
-                    // Update progress
-                    {
-                        let mut bytes = processed_bytes.lock().unwrap();
-                        *bytes += directive.size();
-                    }
+                result?;
+
+                // Update progress
+                {
+                    let mut bytes = processed_bytes.lock().unwrap();
+                    *bytes += directive.size();
                 }
 
                 Ok::<(), InstallError>(())
@@ -594,27 +583,28 @@ impl Installer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::install::directives::{FromArchiveDirective, InlineFileDirective};
+    use crate::install::directives::{FromArchive, InlineFileDirective, PatchedFromArchive};
 
     #[tokio::test]
     async fn test_installer_creation() {
+        let vfs = VfsContext::new();
         let config = InstallerConfig::default();
-        let directives = vec![
-            Directive::FromArchive(FromArchiveDirective::new(
+        let directives: Vec<Arc<Directive>> = vec![
+            Arc::new(Directive::FromArchive(FromArchive::new(
                 "test.txt".to_string(),
                 "abc123".to_string(),
                 100,
                 vec!["archive_hash".to_string(), "path/to/file".to_string()],
-            )),
-            Directive::InlineFile(InlineFileDirective::new(
+            ))),
+            Arc::new(Directive::InlineFile(InlineFileDirective::new(
                 "inline.txt".to_string(),
                 "def456".to_string(),
                 50,
                 "inline_data_id".to_string(),
-            )),
+            ))),
         ];
 
-        let installer = Installer::new(config, directives);
+        let installer = Installer::new(config, directives, vfs);
         assert_eq!(installer.total_bytes, 150);
         assert_eq!(installer.directives.len(), 2);
     }
@@ -633,7 +623,9 @@ mod tests {
             call_count_clone.fetch_add(1, Ordering::SeqCst);
         });
 
-        let installer = Installer::new(config, directives)
+        let vfs = VfsContext::new();
+
+        let installer = Installer::new(config, directives, vfs)
             .with_progress_callback(callback);
 
         // This should trigger at least one progress callback during preparation
@@ -641,4 +633,44 @@ mod tests {
 
         assert!(call_count.load(Ordering::SeqCst) > 0);
     }
+
+
+    mod archive_files {
+        use super::*;
+
+
+    #[tokio::test]
+    async fn test_install_archive_files() {
+        let vfs = VfsContext::new();
+        let config = InstallerConfig::default();
+        let directives: Vec<Arc<Directive>> = vec![
+            Arc::new(Directive::Test(crate::install::directives::TestDirective::new(
+                "test.txt".to_string(),
+                "abc123".to_string(),
+                100,
+                "test_data_id".to_string(),
+            ))),
+            Arc::new(Directive::FromArchive(FromArchive::new(
+                "test.txt".to_string(),
+                "abc123".to_string(),
+                100,
+                vec!["archive_hash".to_string(), "path/to/file".to_string()],
+            ))),
+            Arc::new(Directive::PatchedFromArchive(PatchedFromArchive::new(
+                "test.txt".to_string(),
+                "abc123".to_string(),
+                100,
+                vec!["archive_hash".to_string(), "path/to/file".to_string()],
+                "def456".to_string(),
+                "patch_id".to_string(),
+            ))),
+        ];
+        let installer = Installer::new(config, directives, vfs);
+
+        installer.install_archive_files().await.ok();
+    }
+
+    }
+
 }
+
