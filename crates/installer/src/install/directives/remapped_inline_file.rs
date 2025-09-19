@@ -6,6 +6,9 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Arc;
 use crate::install::error::InstallError;
+use super::common_directive_utils::{
+    load_source_text, write_file_with_hash, delete_if_exists, ensure_parent_dir, apply_path_replacements
+};
 
 /// Write embedded data with path placeholder replacement
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -40,23 +43,39 @@ impl RemappedInlineFile {
         &self,
         install_dir: &Arc<PathBuf>,
         extracted_modlist_dir: &Arc<PathBuf>,
-        _downloads_dir: &Arc<PathBuf>,
-        _progress_callback: Option<Box<dyn Fn(u64, u64) + Send + Sync>>,
-    ) -> Result<(), InstallError> {
-        // TODO: Implement remapped inline file writing logic
-        // 1. Load data from extracted_modlist_dir + self.source_data_id as string
-        // 2. Replace path placeholders:
-        //    - {GAME_PATH_MAGIC_*} -> game_dir
-        //    - {MO2_PATH_MAGIC_*} -> install_dir
-        //    - {DOWNLOAD_PATH_MAGIC_*} -> downloads_dir
-        // 3. Write remapped data to install_dir + self.to
-        // 4. Note: Hash verification may be tricky since content changes
-        // 5. Update progress via callback
+        game_dir: &Arc<PathBuf>,
+        downloads_dir: &Arc<PathBuf>,
+        progress_callback: Option<Box<dyn Fn(u64, u64) + Send + Sync>>,
+    ) -> Result<String, InstallError> {
+        let destination = install_dir.join(&self.to);
+        let source_data_path = extracted_modlist_dir.join(&self.source_data_id);
 
-        let _destination = install_dir.join(&self.to);
-        let _source_data_path = extracted_modlist_dir.join(&self.source_data_id);
+        // Delete existing file if it exists (matches C#'s outPath.Delete())
+        delete_if_exists(&destination).await?;
 
-        todo!("Implement RemappedInlineFile directive execution")
+        // Ensure parent directory exists
+        ensure_parent_dir(&destination).await?;
+
+        // Load text data from extracted modlist (equivalent to LoadBytesFromPath + Encoding.UTF8.GetString in C#)
+        let content = load_source_text(&source_data_path).await?;
+
+        // Apply path magic replacements (equivalent to C#'s WriteRemappedFile logic)
+        let replacements = self.get_path_replacements(install_dir, game_dir, downloads_dir);
+        let remapped_content = apply_path_replacements(&content, &replacements);
+
+        // Write remapped data to destination and compute hash
+        let computed_hash = write_file_with_hash(&destination, remapped_content.as_bytes()).await?;
+
+        // Note: Hash verification is skipped for remapped files since content changes
+        // This matches C# behavior where FileHashCache.FileHashCachedAsync is called but no verification
+
+        // Update progress via callback if provided
+        if let Some(callback) = progress_callback {
+            callback(self.size, self.size);
+        }
+
+        // Return the computed hash for caching
+        Ok(computed_hash)
     }
 
     /// Get the path magic replacements that will be applied

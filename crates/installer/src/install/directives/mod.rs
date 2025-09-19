@@ -14,6 +14,7 @@ pub mod from_archive;
 pub mod patched_from_archive;
 pub mod inline_file;
 pub mod remapped_inline_file;
+pub mod common_directive_utils;
 pub mod transformed_texture;
 pub mod create_bsa;
 pub mod merged_patch;
@@ -57,27 +58,65 @@ pub enum Directive {
 }
 
 impl Directive {
-    /// Get the destination path for any directive type
-    pub async fn execute(&self, install_dir: &Arc<PathBuf>,
+    /// Execute the directive and return computed hash (if applicable)
+    pub async fn execute(&self,
+        install_dir: &Arc<PathBuf>,
         extracted_modlist_dir: &Arc<PathBuf>,
         downloads_dir: &Arc<PathBuf>,
+        game_dir: &Arc<PathBuf>,
         vfs_context: Arc<VfsContext>,
         progress_callback: Option<Box<dyn Fn(u64, u64) + Send + Sync>>,
-        ) -> Result<(), InstallError> {
+        ) -> Result<Option<String>, InstallError> {
 
         match self {
-            Directive::FromArchive(d) => d.execute(install_dir, extracted_modlist_dir, vfs_context, progress_callback).await,
-            Directive::PatchedFromArchive(d) => d.execute(install_dir, vfs_context, extracted_modlist_dir, progress_callback).await,
-            Directive::InlineFile(d) => d.execute(install_dir, extracted_modlist_dir, progress_callback).await,
-            Directive::RemappedInlineFile(d) => d.execute(install_dir, extracted_modlist_dir, downloads_dir, progress_callback).await,
-            Directive::TransformedTexture(d) => d.execute(install_dir, vfs_context, progress_callback).await,
-            Directive::CreateBSA(d) => d.execute(install_dir, extracted_modlist_dir, progress_callback).await,
-            Directive::MergedPatch(d) => d.execute(install_dir, extracted_modlist_dir, progress_callback).await,
-            Directive::PropertyFile(d) => d.execute(install_dir, extracted_modlist_dir, progress_callback).await,
-            Directive::ArchiveMeta(d) => d.execute(install_dir, extracted_modlist_dir, progress_callback).await,
-            Directive::IgnoredDirectly(d) => d.execute(install_dir, progress_callback).await,
-            Directive::NoMatch(d) => d.execute(install_dir, progress_callback).await,
-            Directive::Test(d) => d.execute(install_dir, extracted_modlist_dir, progress_callback, vfs_context).await,
+            Directive::FromArchive(d) => {
+                d.execute(install_dir, extracted_modlist_dir, vfs_context, progress_callback).await?;
+                Ok(None) // Archive directives don't return hashes
+            },
+            Directive::PatchedFromArchive(d) => {
+                d.execute(install_dir, vfs_context, extracted_modlist_dir, progress_callback).await?;
+                Ok(None) // Archive directives don't return hashes
+            },
+            Directive::InlineFile(d) => {
+                let hash = d.execute(install_dir, extracted_modlist_dir, progress_callback).await?;
+                Ok(Some(hash))
+            },
+            Directive::RemappedInlineFile(d) => {
+                let hash = d.execute(install_dir, extracted_modlist_dir, game_dir, downloads_dir, progress_callback).await?;
+                Ok(Some(hash))
+            },
+            Directive::TransformedTexture(d) => {
+                d.execute(install_dir, vfs_context, progress_callback).await?;
+                Ok(None) // Texture directives don't return hashes (for now)
+            },
+            Directive::CreateBSA(d) => {
+                d.execute(install_dir, extracted_modlist_dir, progress_callback).await?;
+                Ok(None) // BSA directives don't return hashes (for now)
+            },
+            Directive::MergedPatch(d) => {
+                d.execute(install_dir, extracted_modlist_dir, progress_callback).await?;
+                Ok(None) // Patch directives don't return hashes (for now)
+            },
+            Directive::PropertyFile(d) => {
+                d.execute(install_dir, extracted_modlist_dir, progress_callback).await?;
+                Ok(None) // Property directives don't return hashes (for now)
+            },
+            Directive::ArchiveMeta(d) => {
+                let hash = d.execute(install_dir, extracted_modlist_dir, progress_callback).await?;
+                Ok(Some(hash)) // Meta directives return hashes for verification
+            },
+            Directive::IgnoredDirectly(d) => {
+                d.execute(install_dir, progress_callback).await?;
+                Ok(None) // Ignored directives don't return hashes
+            },
+            Directive::NoMatch(d) => {
+                d.execute(install_dir, progress_callback).await?;
+                Ok(None) // NoMatch directives don't return hashes
+            },
+            Directive::Test(d) => {
+                d.execute(install_dir, extracted_modlist_dir, progress_callback, vfs_context).await?;
+                Ok(None) // Test directives don't return hashes
+            },
         }
 
     }
@@ -133,6 +172,7 @@ impl Directive {
             Directive::Test(d) => d.size,
         }
     }
+
 
     // /// Check if this directive requires VFS (archive-based installation)
     // pub fn requires_vfs(&self) -> bool {

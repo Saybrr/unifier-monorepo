@@ -6,6 +6,9 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Arc;
 use crate::install::error::InstallError;
+use super::common_directive_utils::{
+    load_source_data, write_file_with_hash, verify_file_hash, delete_if_exists, ensure_parent_dir
+};
 
 /// Write embedded data directly to the destination
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -40,17 +43,33 @@ impl InlineFileDirective {
         &self,
         install_dir: &Arc<PathBuf>,
         extracted_modlist_dir: &Arc<PathBuf>,
-        _progress_callback: Option<Box<dyn Fn(u64, u64) + Send + Sync>>,
-    ) -> Result<(), InstallError> {
-        // TODO: Implement inline file writing logic
-        // 1. Load data from extracted_modlist_dir + self.source_data_id
-        // 2. Write data to install_dir + self.to
-        // 3. Verify hash matches self.hash
-        // 4. Update progress via callback
+        progress_callback: Option<Box<dyn Fn(u64, u64) + Send + Sync>>,
+    ) -> Result<String, InstallError> {
+        let destination = install_dir.join(&self.to);
+        let source_data_path = extracted_modlist_dir.join(&self.source_data_id);
 
-        let _destination = install_dir.join(&self.to);
-        let _source_data_path = extracted_modlist_dir.join(&self.source_data_id);
+        // Delete existing file if it exists (matches C#'s outPath.Delete())
+        delete_if_exists(&destination).await?;
 
-        todo!("Implement InlineFile directive execution")
+        // Ensure parent directory exists
+        ensure_parent_dir(&destination).await?;
+
+        // Load data from extracted modlist (equivalent to LoadBytesFromPath in C#)
+        let data = load_source_data(&source_data_path).await?;
+
+        // Write data to destination and compute hash (equivalent to WriteAllHashedAsync in C#)
+        let computed_hash = write_file_with_hash(&destination, &data).await?;
+
+        // Verify hash matches expected (equivalent to ThrowOnNonMatchingHash in C#)
+        // Note: Skip verification for known modified files (like C#'s Consts.KnownModifiedFiles check)
+        verify_file_hash(&self.to, &self.hash, &computed_hash)?;
+
+        // Update progress via callback if provided
+        if let Some(callback) = progress_callback {
+            callback(self.size, self.size);
+        }
+
+        // Return the computed hash for caching
+        Ok(computed_hash)
     }
 }
