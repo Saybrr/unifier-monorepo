@@ -9,7 +9,7 @@ use crate::install::directives::{
     FromArchive,
     PatchedFromArchive,
     InlineFileDirective,
-    RemappedInlineFileDirective,
+    RemappedInlineFile,
     TransformedTextureDirective,
     CreateBSADirective,
     MergedPatchDirective,
@@ -78,7 +78,7 @@ pub enum Directive {
 
     /// Write embedded data with path placeholder replacement
     #[serde(rename = "RemappedInlineFile")]
-    RemappedInlineFile(RemappedInlineFileDirective),
+    RemappedInlineFile(RemappedInlineFile),
 
     /// Extract texture and apply format/compression changes
     #[serde(rename = "TransformedTexture")]

@@ -4,6 +4,10 @@
 //! Each directive type is defined in its own file along with its execute method.
 
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
+use std::sync::Arc;
+use crate::install::error::InstallError;
+use crate::install::vfs::VfsContext;
 
 // Individual directive type modules
 pub mod from_archive;
@@ -23,7 +27,7 @@ pub mod test_directive;
 pub use from_archive::FromArchive;
 pub use patched_from_archive::PatchedFromArchive;
 pub use inline_file::InlineFileDirective;
-pub use remapped_inline_file::RemappedInlineFileDirective;
+pub use remapped_inline_file::RemappedInlineFile;
 pub use transformed_texture::TransformedTextureDirective;
 pub use create_bsa::CreateBSADirective;
 pub use merged_patch::{MergedPatchDirective, SourcePatch};
@@ -41,7 +45,7 @@ pub enum Directive {
     FromArchive(FromArchive),
     PatchedFromArchive(PatchedFromArchive),
     InlineFile(InlineFileDirective),
-    RemappedInlineFile(RemappedInlineFileDirective),
+    RemappedInlineFile(RemappedInlineFile),
     TransformedTexture(TransformedTextureDirective),
     CreateBSA(CreateBSADirective),
     MergedPatch(MergedPatchDirective),
@@ -54,6 +58,29 @@ pub enum Directive {
 
 impl Directive {
     /// Get the destination path for any directive type
+    pub async fn execute(&self, install_dir: &Arc<PathBuf>,
+        extracted_modlist_dir: &Arc<PathBuf>,
+        downloads_dir: &Arc<PathBuf>,
+        vfs_context: Arc<VfsContext>,
+        progress_callback: Option<Box<dyn Fn(u64, u64) + Send + Sync>>,
+        ) -> Result<(), InstallError> {
+
+        match self {
+            Directive::FromArchive(d) => d.execute(install_dir, extracted_modlist_dir, vfs_context, progress_callback).await,
+            Directive::PatchedFromArchive(d) => d.execute(install_dir, vfs_context, extracted_modlist_dir, progress_callback).await,
+            Directive::InlineFile(d) => d.execute(install_dir, extracted_modlist_dir, progress_callback).await,
+            Directive::RemappedInlineFile(d) => d.execute(install_dir, extracted_modlist_dir, downloads_dir, progress_callback).await,
+            Directive::TransformedTexture(d) => d.execute(install_dir, vfs_context, progress_callback).await,
+            Directive::CreateBSA(d) => d.execute(install_dir, extracted_modlist_dir, progress_callback).await,
+            Directive::MergedPatch(d) => d.execute(install_dir, extracted_modlist_dir, progress_callback).await,
+            Directive::PropertyFile(d) => d.execute(install_dir, extracted_modlist_dir, progress_callback).await,
+            Directive::ArchiveMeta(d) => d.execute(install_dir, extracted_modlist_dir, progress_callback).await,
+            Directive::IgnoredDirectly(d) => d.execute(install_dir, progress_callback).await,
+            Directive::NoMatch(d) => d.execute(install_dir, progress_callback).await,
+            Directive::Test(d) => d.execute(install_dir, extracted_modlist_dir, progress_callback, vfs_context).await,
+        }
+
+    }
     pub fn to(&self) -> &str {
         match self {
             Directive::FromArchive(d) => &d.to,

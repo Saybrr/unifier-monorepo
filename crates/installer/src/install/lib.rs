@@ -58,6 +58,8 @@ use crate::install::error::InstallError;
 use crate::install::directives::Directive;
 use crate::install::vfs::VfsContext;
 
+use futures::stream::{self, StreamExt};
+
 /// Progress callback type for installation updates
 pub type ProgressCallback = Arc<dyn Fn(InstallProgress) + Send + Sync>;
 
@@ -116,11 +118,11 @@ pub struct InstallerConfig {
 impl Default for InstallerConfig {
     fn default() -> Self {
         Self {
-            install_dir: Arc::new(PathBuf::from("./install")),
-            downloads_dir: Arc::new(PathBuf::from("./downloads")),
+            install_dir: Arc::new(PathBuf::from("./install")),  //FINAL INSTALL DIR
+            downloads_dir: Arc::new(PathBuf::from("./downloads")), //DOWNLOADS DIR - default is install dir/downloads
             extracted_modlist_dir: Arc::new(PathBuf::from("./temp/extracted")),
             temp_dir: Arc::new(PathBuf::from("./temp")),
-            game_dir: Arc::new(PathBuf::from("./game")), // Default game directory
+            game_dir: Arc::new(PathBuf::from("./game")), // directory of the game we are modding, likey from steamapps
             max_concurrency: std::cmp::min(
                 std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4),
                 8  // Cap at 8 to balance performance vs memory usage
@@ -139,7 +141,7 @@ pub struct Installer {
     config: InstallerConfig,
     directives: Vec<Arc<Directive>>,
     vfs: VfsContext,
-    progress_callback: Option<ProgressCallback>,
+    progress_callback: ProgressCallback,
     cancellation_token: CancellationToken,
 
     // Internal state
@@ -157,7 +159,7 @@ impl Installer {
             config,
             directives,
             vfs,
-            progress_callback: None,
+            progress_callback: Arc::new(|_| {}),
             cancellation_token: CancellationToken::new(),
             total_bytes,
             processed_bytes: Arc::new(Mutex::new(0)),
@@ -167,7 +169,7 @@ impl Installer {
 
     /// Set a progress callback for installation updates
     pub fn with_progress_callback(mut self, callback: ProgressCallback) -> Self {
-        self.progress_callback = Some(callback);
+        self.progress_callback = callback;
         self
     }
 
@@ -307,6 +309,7 @@ impl Installer {
     }
 
     /// Phase 3: Install archive-based files grouped by directive type
+    #[allow(dead_code)]
     async fn install_archive_files(&self) -> Result<(), InstallError> {
         if self.directives.is_empty() {
             return Ok(());
@@ -325,6 +328,14 @@ impl Installer {
             type_groups.entry(discriminant).or_insert_with(Vec::new).push(Arc::clone(directive));
         }
 
+        // stream::iter(type_groups).for_each_concurrent(self.config.max_concurrency, |(_directive_type, directives)| {
+        //     async move {
+        //         for directive in directives {
+        //             directive.execute(install_dir, downloads_dir, vfs).await;
+        //         }
+        //     }
+        // }).await;
+
         // Process each directive type group in parallel
         let semaphore = Arc::new(Semaphore::new(self.config.max_concurrency));
         let mut tasks = Vec::new();
@@ -333,11 +344,14 @@ impl Installer {
             // Clone all the data needed for the task
             let sem = semaphore.clone();
             let install_dir = self.config.install_dir.clone();
+            let downloads_dir = self.config.downloads_dir.clone();
+            //Dont need game dir here because we have previously copied game files to the install dir during download phase
+           // let game_dir = self.config.game_dir.clone();
             let extracted_modlist_dir = self.config.extracted_modlist_dir.clone();
             let processed_bytes = self.processed_bytes.clone();
             let cancellation_token = self.cancellation_token.clone();
             let vfs = Arc::new(self.vfs.clone());
-
+            //let progress_callback = self.progress_callback.clone();
             let task = tokio::spawn(async move {
                 let _permit = sem.acquire().await.unwrap();
 
@@ -345,16 +359,18 @@ impl Installer {
                     if cancellation_token.is_cancelled() {
                         break;
                     }
-
+                    let result = directive.execute(
+                        &install_dir,
+                        &extracted_modlist_dir,
+                        &downloads_dir,
+                        vfs.clone(),
+                        None //Stubbed Out Progress Callback
+                    ).await;
                     // Pattern match on the directive type
-                    let result = match directive.as_ref() {
-                        Directive::FromArchive(d) => d.execute(&install_dir, &extracted_modlist_dir, Some(vfs.clone()), None).await,
-                        Directive::PatchedFromArchive(d) => d.execute(&install_dir, Some(vfs.clone()), &extracted_modlist_dir, None).await,
-                        Directive::Test(_) => Ok(()), // TODO: implement test directive execution
-                        _ => Ok(()), // Other types don't need VFS
-                    };
+                    if let Err(e) = result {
+                        return Err(e);
+                    }
 
-                    result.map_err(|e| InstallError::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
 
                     // Update progress
                     {
@@ -379,6 +395,7 @@ impl Installer {
     }
 
     /// Phase 4: Install inline files (fully parallelized) - PROPER IMPLEMENTATION
+    #[allow(dead_code)]
     async fn install_inline_files(&self) -> Result<(), InstallError> {
 
         if self.directives.is_empty() {
@@ -449,6 +466,7 @@ impl Installer {
     }
 
     /// Phase 5: Create BSA files (sequential per BSA, but parallel within each BSA)
+    #[allow(dead_code)]
     async fn create_bsa_files(&mut self) -> Result<(), InstallError> {
 
         if self.directives.is_empty() {
@@ -485,6 +503,7 @@ impl Installer {
     }
 
     /// Phase 6: Generate patches (parallelized)
+    #[allow(dead_code)]
     async fn generate_patches(&mut self) -> Result<(), InstallError> {
 
         if self.directives.is_empty() {
@@ -548,6 +567,7 @@ impl Installer {
     }
 
     /// Phase 7: Finalize installation
+    #[allow(dead_code)]
     async fn finalize_installation(&mut self) -> Result<(), InstallError> {
         self.update_progress(InstallPhase::Finishing, 7, 7, 0, 0, "Finalizing installation".to_string());
 
@@ -561,7 +581,7 @@ impl Installer {
 
     /// Update progress and notify callback if set
     fn update_progress(&self, phase: InstallPhase, current_step: usize, total_steps: usize, processed_items: usize, total_items: usize, message: String) {
-        if let Some(callback) = &self.progress_callback {
+     let callback = &self.progress_callback;
             let processed_bytes = *self.processed_bytes.lock().unwrap();
 
             let progress = InstallProgress {
@@ -576,7 +596,7 @@ impl Installer {
             };
 
             callback(progress);
-        }
+
     }
 }
 

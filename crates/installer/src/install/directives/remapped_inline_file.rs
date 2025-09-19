@@ -9,7 +9,7 @@ use crate::install::error::InstallError;
 
 /// Write embedded data with path placeholder replacement
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RemappedInlineFileDirective {
+pub struct RemappedInlineFile {
     /// Destination path relative to install directory
     #[serde(rename = "To")]
     pub to: String,
@@ -24,7 +24,7 @@ pub struct RemappedInlineFileDirective {
     pub source_data_id: String,
 }
 
-impl RemappedInlineFileDirective {
+impl RemappedInlineFile {
     /// Create a new RemappedInlineFile directive
     pub fn new(to: String, hash: String, size: u64, source_data_id: String) -> Self {
         Self {
@@ -40,7 +40,6 @@ impl RemappedInlineFileDirective {
         &self,
         install_dir: &Arc<PathBuf>,
         extracted_modlist_dir: &Arc<PathBuf>,
-        _game_dir: &Arc<PathBuf>,
         _downloads_dir: &Arc<PathBuf>,
         _progress_callback: Option<Box<dyn Fn(u64, u64) + Send + Sync>>,
     ) -> Result<(), InstallError> {

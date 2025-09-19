@@ -40,7 +40,7 @@ impl FromArchive {
         &self,
         install_dir: &Arc<PathBuf>,
         _extracted_modlist_dir: &Arc<PathBuf>,
-        _vfs_context: Option<Arc<VfsContext>>,
+        _vfs_context: Arc<VfsContext>,
         _progress_callback: Option<Box<dyn Fn(u64, u64) + Send + Sync>>,
     ) -> Result<(), InstallError> {
         // TODO: Implement archive extraction logic

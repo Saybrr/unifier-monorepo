@@ -41,7 +41,7 @@ impl TestDirective {
         install_dir: &Arc<PathBuf>,
         extracted_modlist_dir: &Arc<PathBuf>,
         _progress_callback: Option<Box<dyn Fn(u64, u64) + Send + Sync>>,
-        _vfs_context: Option<Arc<VfsContext>>,
+        _vfs_context: Arc<VfsContext>,
     ) -> Result<(), InstallError> {
         // Delegate to the existing execute method
         let _destination = install_dir.join(&self.to);

@@ -55,7 +55,7 @@ impl PatchedFromArchive {
     pub async fn execute(
         &self,
         install_dir: &Arc<PathBuf>,
-        _vfs_context: Option<Arc<VfsContext>>,
+        _vfs_context: Arc<VfsContext>,
         _extracted_modlist_dir: &Arc<PathBuf>,
         _progress_callback: Option<Box<dyn Fn(u64, u64) + Send + Sync>>,
     ) -> Result<(), InstallError> {
