@@ -47,7 +47,6 @@
 //! # }
 //! ```
 
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -58,7 +57,7 @@ use crate::install::error::InstallError;
 use crate::install::directives::Directive;
 use crate::install::vfs::VfsContext;
 
-use futures::stream::{self, StreamExt};
+use futures::stream::{self, StreamExt, TryStreamExt};
 
 /// Progress callback type for installation updates
 pub type ProgressCallback = Arc<dyn Fn(InstallProgress) + Send + Sync>;
@@ -320,76 +319,58 @@ impl Installer {
             "Installing files from archives".to_string()
         );
 
-        // Group directives by type for efficient processing
-        let mut type_groups: HashMap<std::mem::Discriminant<Directive>, Vec<Arc<Directive>>> = HashMap::new();
+               // Group directives by source archive (like C#'s GroupBy(a => a.VF))
+               let mut archive_groups: std::collections::HashMap<String, Vec<Arc<Directive>>> = std::collections::HashMap::new();
 
-        for directive in &self.directives {
-            let discriminant = std::mem::discriminant(directive.as_ref());
-            type_groups.entry(discriminant).or_insert_with(Vec::new).push(Arc::clone(directive));
-        }
+               for directive in &self.directives {
+                   let archive_key = match directive.as_ref() {
+                       // Group archive-based directives by their source archive hash
+                       Directive::FromArchive(d) => {
+                           d.archive_hash().unwrap_or("unknown_archive").to_string()
+                       },
+                       Directive::PatchedFromArchive(d) => {
+                           d.archive_hash().unwrap_or("unknown_archive").to_string()
+                       },
+                       Directive::TransformedTexture(d) => {
+                           d.archive_hash().unwrap_or("unknown_archive").to_string()
+                       },
+                       // Non-archive directives get their own groups
+                       Directive::InlineFile(_) => "inline_files".to_string(),
+                       Directive::RemappedInlineFile(_) => "remapped_inline_files".to_string(),
+                       Directive::CreateBSA(_) => "create_bsa".to_string(),
+                       Directive::PropertyFile(_) => "property_files".to_string(),
+                       Directive::MergedPatch(_) => "merged_patches".to_string(),
+                       _ => "other_directives".to_string(),
+                   };
 
-        // stream::iter(type_groups).for_each_concurrent(self.config.max_concurrency, |(_directive_type, directives)| {
-        //     async move {
-        //         for directive in directives {
-        //             directive.execute(install_dir, downloads_dir, vfs).await;
-        //         }
-        //     }
-        // }).await;
+                   archive_groups.entry(archive_key).or_insert_with(Vec::new).push(Arc::clone(directive));
+               }
 
-        // Process each directive type group in parallel
-        let semaphore = Arc::new(Semaphore::new(self.config.max_concurrency));
-        let mut tasks = Vec::new();
+               // Process archives concurrently (like C#'s _vfs.Extract with concurrent archives)
+               stream::iter(archive_groups)
+                   .map(Ok)
+                   .try_for_each_concurrent(self.config.max_concurrency, |(archive_key, directives)| {
+                       let install_dir = self.config.install_dir.clone();
+                       let downloads_dir = self.config.downloads_dir.clone();
+                       let extracted_modlist_dir = self.config.extracted_modlist_dir.clone();
+                       let processed_bytes = self.processed_bytes.clone();
+                       let cancellation_token = self.cancellation_token.clone();
+                       let vfs = Arc::new(self.vfs.clone());
 
-        for (_directive_type, directives) in type_groups {
-            // Clone all the data needed for the task
-            let sem = semaphore.clone();
-            let install_dir = self.config.install_dir.clone();
-            let downloads_dir = self.config.downloads_dir.clone();
-            //Dont need game dir here because we have previously copied game files to the install dir during download phase
-           // let game_dir = self.config.game_dir.clone();
-            let extracted_modlist_dir = self.config.extracted_modlist_dir.clone();
-            let processed_bytes = self.processed_bytes.clone();
-            let cancellation_token = self.cancellation_token.clone();
-            let vfs = Arc::new(self.vfs.clone());
-            //let progress_callback = self.progress_callback.clone();
-            let task = tokio::spawn(async move {
-                let _permit = sem.acquire().await.unwrap();
+                       async move {
+                           // Process all directives from this archive sequentially
+                           // (matches C#'s foreach loop within each archive - lines 248-301)
+                           for directive in directives {
+                               if cancellation_token.is_cancelled() {
+                                   return Ok(());
+                               }
 
-                for directive in directives {
-                    if cancellation_token.is_cancelled() {
-                        break;
-                    }
-                    let result = directive.execute(
-                        &install_dir,
-                        &extracted_modlist_dir,
-                        &downloads_dir,
-                        vfs.clone(),
-                        None //Stubbed Out Progress Callback
-                    ).await;
-                    // Pattern match on the directive type
-                    if let Err(e) = result {
-                        return Err(e);
-                    }
-
-
-                    // Update progress
-                    {
-                        let mut bytes = processed_bytes.lock().unwrap();
-                        *bytes += directive.size();
-                    }
-                }
-
-                Ok::<(), InstallError>(())
-            });
-
-            tasks.push(task);
-        }
-
-        // Wait for all tasks to complete
-        let results = futures::future::join_all(tasks).await;
-        for result in results {
-            result.map_err(|e| InstallError::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))??;
-        }
+                               directive.execute(&install_dir, &extracted_modlist_dir, &downloads_dir, vfs.clone(), None).await?;
+                               *processed_bytes.lock().unwrap() += directive.size();
+                           }
+                           Ok::<(), InstallError>(())
+                       }
+                   }).await?;
 
         Ok(())
     }
