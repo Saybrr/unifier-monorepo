@@ -471,6 +471,7 @@ impl Installer {
 
 
     #[allow(dead_code)]
+    //TODO: investigate the FromMeta directive in the mod list to see what the directive needs as arguments
     async fn write_meta_files(&self) -> Result<(), InstallError> {
         // Filter to only inline file directives (matches C#'s .OfType<InlineFile>())
         let meta_directives: Vec<Arc<Directive>> = self.directives

@@ -16,6 +16,9 @@ pub enum InstallError {
         actual: String,
     },
 
+    #[error("Archive extraction failed: {0}")]
+    ArchiveExtraction(String),
+
     #[error("File not found: {0}")]
     FileNotFound(PathBuf),
 
